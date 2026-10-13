@@ -18,6 +18,10 @@ dependencies {
     implementation(libs.ktor.serverWebsockets)
     runtimeOnly(libs.slf4j.simple)
 
+    testImplementation(libs.kotlin.test)
+    testImplementation(libs.ktor.serverTestHost)
+    testImplementation(libs.ktor.clientWebsockets)
+
     implementation(libs.compose.uiToolingPreview)
 }
 
