@@ -7,6 +7,11 @@ androidx-activity = "1.13.0"
 composeMultiplatform = "1.12.1"
 kotlin = "2.4.20"
 kotlinx-coroutines = "1.11.0"
+kotlinx-serialization = "1.11.0"
+# Ktor 3.6.0 is built against kotlinx-coroutines 1.11.0 and kotlinx-serialization 1.11.0.
+ktor = "3.6.0"
+# Matches the slf4j-api version Ktor 3.6.0 depends on.
+slf4j = "2.0.19"
 # Pre-release on purpose: JetBrains' material3 is versioned separately from Compose
 # Multiplatform and has no stable release for CMP 1.12.x (newest stable, 1.9.0, targets
 # an older CMP line). This is the version the KMP wizard pairs with CMP 1.12.1.
@@ -22,6 +27,15 @@ compose-material3 = { module = "org.jetbrains.compose.material3:material3", vers
 compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "composeMultiplatform" }
 compose-uiToolingPreview = { module = "org.jetbrains.compose.ui:ui-tooling-preview", version.ref = "composeMultiplatform" }
 kotlinx-coroutinesSwing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "kotlinx-coroutines" }
+kotlinx-coroutinesCore = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
+kotlinx-serializationJson = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+# Desktop server. Netty, not CIO: Ktor's CIO server engine cannot serve TLS.
+ktor-serverNetty = { module = "io.ktor:ktor-server-netty", version.ref = "ktor" }
+ktor-serverWebsockets = { module = "io.ktor:ktor-server-websockets", version.ref = "ktor" }
+# Android client. OkHttp gives mature TLS and certificate pinning for later slices.
+ktor-clientOkhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
+ktor-clientWebsockets = { module = "io.ktor:ktor-client-websockets", version.ref = "ktor" }
+slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }
@@ -30,3 +44,4 @@ composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "composeMul
 composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlinJvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+kotlinSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

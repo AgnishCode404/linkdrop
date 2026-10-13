@@ -14,6 +14,10 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.kotlinx.coroutinesSwing)
 
+    implementation(libs.ktor.serverNetty)
+    implementation(libs.ktor.serverWebsockets)
+    runtimeOnly(libs.slf4j.simple)
+
     implementation(libs.compose.uiToolingPreview)
 }
 

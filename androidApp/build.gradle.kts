@@ -19,6 +19,9 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.ui)
 
+    implementation(libs.ktor.clientOkhttp)
+    implementation(libs.ktor.clientWebsockets)
+
     implementation(libs.compose.uiToolingPreview)
     debugImplementation(libs.compose.uiTooling)
 }
