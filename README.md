@@ -1,30 +1,23 @@
-This is a Kotlin Multiplatform project targeting Android, Desktop (JVM).
+LinkDrop transfers files between a Linux desktop and an Android phone on the same Wi-Fi.
+It is a Kotlin Multiplatform project.
 
-* [/shared](./shared/src) is for code that will be shared across your Compose Multiplatform applications.
-  It contains several subfolders:
-  - [commonMain](./shared/src/commonMain/kotlin) is for code that’s common for all targets.
-  - Other folders are for Kotlin code that will be compiled for only the platform indicated in the folder name.
-    For example, if you want to use Apple’s CoreCrypto for the iOS part of your Kotlin app,
-    the [iosMain](./shared/src/iosMain/kotlin) folder would be the right place for such calls.
-    Similarly, if you want to edit the Desktop (JVM) specific part, the [jvmMain](./shared/src/jvmMain/kotlin)
-    folder is the appropriate location.
+* [/shared](./shared/src) holds the protocol and connection logic both apps use (no UI).
+  - [commonMain](./shared/src/commonMain/kotlin) is code common to all targets.
+  - `androidMain` / `jvmMain` are for Android-only and desktop-only code.
+* [/androidApp](./androidApp) is the Android app (client in Slice A).
+* [/desktopApp](./desktopApp) is the Linux desktop app (server in Slice A).
+* [docs/PROTOCOL.md](./docs/PROTOCOL.md) is the wire protocol both apps speak.
+
+All dependency versions are pinned in [gradle/libs.versions.toml](./gradle/libs.versions.toml).
 
 ### Running the apps
 
-Use the run configurations provided by the run widget in your IDE's toolbar. You can also use these commands and options:
-
-- Android app: `./gradlew :androidApp:assembleDebug`
+- Android app: `./gradlew :androidApp:installDebug` (with a phone connected over USB)
 - Desktop app:
   - Hot reload: `./gradlew :desktopApp:hotRun --auto`
   - Standard run: `./gradlew :desktopApp:run`
 
 ### Running tests
 
-Use the run button in your IDE's editor gutter, or run tests using Gradle tasks:
-
 - Android tests: `./gradlew :shared:testAndroidHostTest`
 - Desktop tests: `./gradlew :shared:jvmTest`
-
----
-
-Learn more about [Kotlin Multiplatform](https://www.jetbrains.com/help/kotlin-multiplatform-dev/get-started.html)…
