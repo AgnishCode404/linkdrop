@@ -10,6 +10,8 @@ dependencies {
     implementation(project(":shared"))
 
     implementation(compose.desktop.currentOs)
+    implementation(libs.compose.foundation)
+    implementation(libs.compose.material3)
     implementation(libs.kotlinx.coroutinesSwing)
 
     implementation(libs.compose.uiToolingPreview)
@@ -17,11 +19,11 @@ dependencies {
 
 compose.desktop {
     application {
-        mainClass = "com.agnish.project.MainKt"
+        mainClass = "com.agnish.linkdrop.MainKt"
 
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "com.agnish.project"
+            targetFormats(TargetFormat.Deb)
+            packageName = "linkdrop"
             packageVersion = "1.0.0"
         }
     }

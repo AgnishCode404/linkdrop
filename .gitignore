@@ -17,3 +17,11 @@ captures
 !*.xcworkspace/contents.xcworkspacedata
 **/xcshareddata/WorkspaceSettings.xcsettings
 node_modules/
+
+# Signing and TLS key material must never be committed
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
