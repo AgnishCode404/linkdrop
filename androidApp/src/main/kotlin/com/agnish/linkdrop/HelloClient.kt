@@ -36,9 +36,9 @@ object HelloClient {
             engine {
                 config { connectTimeout(5, TimeUnit.SECONDS) }
             }
-            install(WebSockets) {
-                maxFrameSize = MAX_FRAME_BYTES.toLong()
-            }
+            // No maxFrameSize here: the OkHttp engine rejects that setting at connect time.
+            // Received frames are size-checked below instead.
+            install(WebSockets)
         }
         return try {
             withTimeout(HELLO_TIMEOUT) {
@@ -46,9 +46,12 @@ object HelloClient {
                 // Plaintext ws:// for Slice A; allowed only by the debug network security config.
                 client.webSocket(host = address.host, port = address.port, path = SESSION_PATH) {
                     send(Frame.Text(ProtocolCodec.encode(local.hello())))
-                    result = when (val frame = incoming.receiveCatching().getOrNull()) {
-                        is Frame.Text -> Handshake.interpretReply(ProtocolCodec.decode(frame.readText()))
-                        null -> HelloResult.Failed("server closed the connection")
+                    val frame = incoming.receiveCatching().getOrNull()
+                    result = when {
+                        frame != null && frame.data.size > MAX_FRAME_BYTES ->
+                            HelloResult.Failed("reply from server too large (${frame.data.size} bytes)")
+                        frame is Frame.Text -> Handshake.interpretReply(ProtocolCodec.decode(frame.readText()))
+                        frame == null -> HelloResult.Failed("server closed the connection")
                         else -> HelloResult.Failed("unexpected reply from server")
                     }
                     close(CloseReason(CloseReason.Codes.NORMAL, "done"))
