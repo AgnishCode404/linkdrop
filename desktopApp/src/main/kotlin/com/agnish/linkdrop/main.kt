@@ -24,30 +24,44 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import com.agnish.linkdrop.protocol.DEFAULT_PORT
 import com.agnish.linkdrop.protocol.LocalDevice
+import com.agnish.linkdrop.protocol.TransportConfig
 
 fun main() {
     val log = EventLog()
     val local = DesktopDevice.load()
-    val server = HelloServer(local, DEFAULT_PORT, log::add)
-    val startError = runCatching { server.start() }.exceptionOrNull()
-    if (startError == null) log.add("Server started on port $DEFAULT_PORT")
+    // BuildFlags is generated from linkdrop.allowPlaintext (see desktopApp/build.gradle.kts).
+    val transport = TransportConfig.choose(BuildFlags.ALLOW_PLAINTEXT, pinnedCertSha256 = null)
+    val server = transport?.let { HelloServer(local, DEFAULT_PORT, it, log::add) }
+    val startError = if (server == null) {
+        TransportConfig.NO_TRANSPORT_MESSAGE
+    } else {
+        runCatching { server.start() }.exceptionOrNull()
+            ?.let { "Server failed to start on port $DEFAULT_PORT: ${it.message}" }
+    }
+    if (server != null && startError == null) log.add("Server started on port $DEFAULT_PORT")
     val addresses = DesktopDevice.lanAddresses()
 
     application {
         Window(
             onCloseRequest = {
-                server.stop()
+                server?.stop()
                 exitApplication()
             },
             title = "LinkDrop",
         ) {
-            DesktopScreen(local, addresses, startError, log)
+            DesktopScreen(local, addresses, transport, startError, log)
         }
     }
 }
 
 @Composable
-fun DesktopScreen(local: LocalDevice, addresses: List<String>, startError: Throwable?, log: EventLog) {
+fun DesktopScreen(
+    local: LocalDevice,
+    addresses: List<String>,
+    transport: TransportConfig?,
+    startError: String?,
+    log: EventLog,
+) {
     val entries by log.entries.collectAsState()
     val listState = rememberLazyListState()
     LaunchedEffect(entries.size) {
@@ -62,13 +76,16 @@ fun DesktopScreen(local: LocalDevice, addresses: List<String>, startError: Throw
             ) {
                 Text("LinkDrop", style = MaterialTheme.typography.headlineSmall)
                 Text("This device: ${local.deviceName}")
+                if (transport == TransportConfig.Plaintext) {
+                    Text(
+                        "Development build: connections are NOT encrypted.",
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 SelectionContainer {
                     Column {
                         when {
-                            startError != null -> Text(
-                                "Server failed to start on port $DEFAULT_PORT: ${startError.message}",
-                                color = MaterialTheme.colorScheme.error,
-                            )
+                            startError != null -> Text(startError, color = MaterialTheme.colorScheme.error)
                             addresses.isEmpty() -> Text(
                                 "Listening on port $DEFAULT_PORT, but no Wi-Fi/LAN address was found.",
                                 color = MaterialTheme.colorScheme.error,

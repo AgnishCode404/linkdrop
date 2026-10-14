@@ -11,6 +11,7 @@ import com.agnish.linkdrop.protocol.MAX_FRAME_BYTES
 import com.agnish.linkdrop.protocol.ProtocolCodec
 import com.agnish.linkdrop.protocol.SESSION_PATH
 import com.agnish.linkdrop.protocol.ServerAddress
+import com.agnish.linkdrop.protocol.TransportConfig
 import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
@@ -56,7 +57,7 @@ class HelloClientTest {
         try {
             return runBlocking {
                 val port = server.engine.resolvedConnectors().first().port
-                HelloClient.sayHello(ServerAddress("127.0.0.1", port), phone)
+                HelloClient.sayHello(ServerAddress("127.0.0.1", port), phone, TransportConfig.Plaintext)
             }
         } finally {
             server.stop(gracePeriodMillis = 0, timeoutMillis = 1_000)
@@ -109,9 +110,20 @@ class HelloClientTest {
     }
 
     @Test
+    fun tlsIsRefusedInsteadOfFallingBackToPlaintext() {
+        // Nothing listens on this port: a connection attempt would report "could not connect".
+        // The exact TLS message proves the client refused before trying plaintext.
+        val freePort = ServerSocket(0).use { it.localPort }
+        val result = runBlocking {
+            HelloClient.sayHello(ServerAddress("127.0.0.1", freePort), phone, TransportConfig.Tls("ab12"))
+        }
+        assertEquals(HelloResult.Failed("TLS is not implemented yet"), result)
+    }
+
+    @Test
     fun nothingListeningIsReported() {
         val freePort = ServerSocket(0).use { it.localPort }
-        val result = runBlocking { HelloClient.sayHello(ServerAddress("127.0.0.1", freePort), phone) }
+        val result = runBlocking { HelloClient.sayHello(ServerAddress("127.0.0.1", freePort), phone, TransportConfig.Plaintext) }
         val failed = assertIs<HelloResult.Failed>(result)
         assertTrue("could not connect" in failed.reason, failed.reason)
     }

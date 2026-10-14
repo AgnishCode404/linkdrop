@@ -17,6 +17,20 @@ All dependency versions are pinned in [gradle/libs.versions.toml](./gradle/libs.
   - Hot reload: `./gradlew :desktopApp:hotRun --auto`
   - Standard run: `./gradlew :desktopApp:run`
 
+### Plaintext development mode
+
+Until TLS and pairing exist, the apps talk over unencrypted `ws://`. This is controlled by
+`linkdrop.allowPlaintext` in [gradle.properties](./gradle.properties) (currently `true`):
+
+- Both apps show "Development build: connections are NOT encrypted" while it is on.
+- `TransportConfig.choose` in `shared` is the only place that picks plaintext or TLS. It never
+  falls back from TLS to plaintext.
+- **Release builds are blocked while it is on:** `./gradlew :androidApp:assembleRelease` and
+  desktop packaging (`packageDeb`, `createDistributable`, …) fail on purpose.
+- Android release builds never allow plaintext anyway: `BuildConfig.ALLOW_PLAINTEXT` is `false`
+  and the release network security config forbids cleartext. The build also fails if that
+  config is ever changed to allow it.
+
 ### Running tests
 
 - Android tests: `./gradlew :shared:testAndroidHostTest`

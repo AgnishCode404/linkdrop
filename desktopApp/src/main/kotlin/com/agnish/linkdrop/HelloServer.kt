@@ -10,6 +10,7 @@ import com.agnish.linkdrop.protocol.MAX_FRAME_BYTES
 import com.agnish.linkdrop.protocol.Message
 import com.agnish.linkdrop.protocol.ProtocolCodec
 import com.agnish.linkdrop.protocol.SESSION_PATH
+import com.agnish.linkdrop.protocol.TransportConfig
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.engine.EmbeddedServer
@@ -35,16 +36,19 @@ private val HELLO_TIMEOUT = 10.seconds
 /** The session is closed on this many malformed frames (PROTOCOL.md, compatibility rule 4). */
 const val MAX_MALFORMED_FRAMES = 3
 
-/** The desktop's WebSocket server. Slice A: plaintext `ws://`, answers the hello handshake. */
+/** The desktop's WebSocket server. Answers the hello handshake. */
 class HelloServer(
     private val local: LocalDevice,
     private val port: Int,
+    private val transport: TransportConfig,
     private val log: (String) -> Unit,
 ) {
     private var server: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
 
-    /** Starts listening on all interfaces. Throws if the port is already in use. */
+    /** Starts listening on all interfaces. Throws if the port is already in use or TLS is requested. */
     fun start() {
+        // Never fall back: a TLS config must not turn into a plaintext server.
+        check(transport is TransportConfig.Plaintext) { "TLS is not implemented yet" }
         server = embeddedServer(Netty, port = port, host = "0.0.0.0") {
             linkDropModule(local, log)
         }.start(wait = false)

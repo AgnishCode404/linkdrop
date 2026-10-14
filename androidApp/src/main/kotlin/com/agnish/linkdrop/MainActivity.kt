@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import com.agnish.linkdrop.protocol.HelloResult
 import com.agnish.linkdrop.protocol.LocalDevice
 import com.agnish.linkdrop.protocol.ServerAddress
+import com.agnish.linkdrop.protocol.TransportConfig
 import kotlinx.coroutines.launch
 
 /**
@@ -54,8 +55,10 @@ class MainActivity : ComponentActivity() {
 
         val local = AndroidDevice.load(this)
         val lastAddress = AndroidDevice.lastAddress(this)
+        // ALLOW_PLAINTEXT is false in every release build (see androidApp/build.gradle.kts).
+        val transport = TransportConfig.choose(BuildConfig.ALLOW_PLAINTEXT, pinnedCertSha256 = null)
         setContent {
-            HelloScreen(local, lastAddress)
+            HelloScreen(local, lastAddress, transport)
         }
     }
 }
@@ -67,7 +70,7 @@ private sealed interface Status {
 }
 
 @Composable
-fun HelloScreen(local: LocalDevice, lastAddress: String) {
+fun HelloScreen(local: LocalDevice, lastAddress: String, transport: TransportConfig?) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var addressText by rememberSaveable { mutableStateOf(lastAddress) }
@@ -75,10 +78,11 @@ fun HelloScreen(local: LocalDevice, lastAddress: String) {
     val address = ServerAddress.parse(addressText)
 
     fun connect(target: ServerAddress) {
+        val secured = transport ?: return
         status = Status.Connecting
         val typed = addressText.trim()
         scope.launch {
-            val result = HelloClient.sayHello(target, local)
+            val result = HelloClient.sayHello(target, local, secured)
             if (result is HelloResult.Connected) AndroidDevice.saveLastAddress(context, typed)
             status = Status.Done(result)
         }
@@ -97,6 +101,14 @@ fun HelloScreen(local: LocalDevice, lastAddress: String) {
             ) {
                 Text("LinkDrop", style = MaterialTheme.typography.headlineSmall)
                 Text("This device: ${local.deviceName}")
+                when (transport) {
+                    null -> Text(TransportConfig.NO_TRANSPORT_MESSAGE, color = MaterialTheme.colorScheme.error)
+                    TransportConfig.Plaintext -> Text(
+                        "Development build: connections are NOT encrypted.",
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    is TransportConfig.Tls -> Unit
+                }
                 OutlinedTextField(
                     value = addressText,
                     onValueChange = { addressText = it },
@@ -117,7 +129,7 @@ fun HelloScreen(local: LocalDevice, lastAddress: String) {
                             connect(target)
                         }
                     },
-                    enabled = address != null && status != Status.Connecting,
+                    enabled = transport != null && address != null && status != Status.Connecting,
                 ) {
                     Text("Say hello")
                 }

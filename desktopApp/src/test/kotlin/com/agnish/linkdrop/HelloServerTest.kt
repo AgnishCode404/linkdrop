@@ -10,6 +10,7 @@ import com.agnish.linkdrop.protocol.Message
 import com.agnish.linkdrop.protocol.PROTOCOL_VERSION
 import com.agnish.linkdrop.protocol.ProtocolCodec
 import com.agnish.linkdrop.protocol.SESSION_PATH
+import com.agnish.linkdrop.protocol.TransportConfig
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
@@ -20,6 +21,7 @@ import io.ktor.websocket.readText
 import java.util.Collections
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -49,6 +51,13 @@ class HelloServerTest {
     /** After an error the server closes; the next receive ends instead of returning a frame. */
     private suspend fun DefaultClientWebSocketSession.assertClosed() {
         assertNull(incoming.receiveCatching().getOrNull())
+    }
+
+    @Test
+    fun tlsConfigRefusesToStartInsteadOfServingPlaintext() {
+        val server = HelloServer(desktop, port = 0, TransportConfig.Tls("ab12")) { logLines += it }
+        val error = assertFailsWith<IllegalStateException> { server.start() }
+        assertEquals("TLS is not implemented yet", error.message)
     }
 
     @Test

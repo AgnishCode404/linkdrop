@@ -7,6 +7,7 @@ import com.agnish.linkdrop.protocol.MAX_FRAME_BYTES
 import com.agnish.linkdrop.protocol.ProtocolCodec
 import com.agnish.linkdrop.protocol.SESSION_PATH
 import com.agnish.linkdrop.protocol.ServerAddress
+import com.agnish.linkdrop.protocol.TransportConfig
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.websocket.WebSockets
@@ -31,7 +32,10 @@ private val HELLO_TIMEOUT = 10.seconds
 /** Slice A client: connects to the desktop, sends hello, reports the reply, disconnects. */
 object HelloClient {
 
-    suspend fun sayHello(address: ServerAddress, local: LocalDevice): HelloResult {
+    suspend fun sayHello(address: ServerAddress, local: LocalDevice, transport: TransportConfig): HelloResult {
+        // Never fall back: a TLS config must not turn into a plaintext connection.
+        if (transport is TransportConfig.Tls) return HelloResult.Failed("TLS is not implemented yet")
+
         val client = HttpClient(OkHttp) {
             engine {
                 config { connectTimeout(5, TimeUnit.SECONDS) }
@@ -43,8 +47,9 @@ object HelloClient {
         return try {
             withTimeout(HELLO_TIMEOUT) {
                 var result: HelloResult = HelloResult.Failed("no reply from server")
-                // Plaintext ws:// for Slice A; allowed only by the debug network security config.
-                client.webSocket(host = address.host, port = address.port, path = SESSION_PATH) {
+                // ws:// is additionally blocked outside debug builds by the network security config.
+                val url = "${transport.scheme}://${address.host}:${address.port}$SESSION_PATH"
+                client.webSocket(urlString = url) {
                     send(Frame.Text(ProtocolCodec.encode(local.hello())))
                     val frame = incoming.receiveCatching().getOrNull()
                     result = when {
