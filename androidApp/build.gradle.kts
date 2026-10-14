@@ -22,6 +22,11 @@ dependencies {
     implementation(libs.ktor.clientOkhttp)
     implementation(libs.ktor.clientWebsockets)
 
+    // JVM unit tests: HelloClient against a local fake WebSocket server.
+    testImplementation(libs.kotlin.testJunit)
+    testImplementation(libs.ktor.serverNetty)
+    testImplementation(libs.ktor.serverWebsockets)
+
     implementation(libs.compose.uiToolingPreview)
     debugImplementation(libs.compose.uiTooling)
 }
