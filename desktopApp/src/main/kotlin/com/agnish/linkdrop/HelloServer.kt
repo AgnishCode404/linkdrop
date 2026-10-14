@@ -1,12 +1,12 @@
 package com.agnish.linkdrop
 
-import com.agnish.linkdrop.protocol.DEFAULT_MAX_CHUNK_BYTES
 import com.agnish.linkdrop.protocol.Decoded
 import com.agnish.linkdrop.protocol.ErrorCodes
 import com.agnish.linkdrop.protocol.ErrorMessage
 import com.agnish.linkdrop.protocol.Handshake
 import com.agnish.linkdrop.protocol.Hello
 import com.agnish.linkdrop.protocol.LocalDevice
+import com.agnish.linkdrop.protocol.MAX_FRAME_BYTES
 import com.agnish.linkdrop.protocol.Message
 import com.agnish.linkdrop.protocol.ProtocolCodec
 import com.agnish.linkdrop.protocol.SESSION_PATH
@@ -29,9 +29,6 @@ import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.time.Duration.Companion.seconds
-
-/** Largest WebSocket frame accepted: one binary chunk plus its 4-byte header (see PROTOCOL.md). */
-const val MAX_FRAME_BYTES = DEFAULT_MAX_CHUNK_BYTES + 4
 
 private val HELLO_TIMEOUT = 10.seconds
 

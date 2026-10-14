@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Release builds: no plaintext traffic at all. The debug build replaces this file
+     (src/debug/res/xml/network_security_config.xml). -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

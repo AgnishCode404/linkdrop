@@ -53,4 +53,37 @@ class HandshakeTest {
     fun clientRejectsAckWithInvalidName() {
         assertNotNull(Handshake.checkAck(HelloAck("d", "", PROTOCOL_VERSION)))
     }
+
+    @Test
+    fun validAckMeansConnected() {
+        val reply = Decoded.Ok("a1", desktop.helloAck())
+        assertEquals(HelloResult.Connected("Arch"), Handshake.interpretReply(reply))
+    }
+
+    @Test
+    fun invalidAckMeansFailed() {
+        val reply = Decoded.Ok("a1", HelloAck("d", "", PROTOCOL_VERSION))
+        assertIs<HelloResult.Failed>(Handshake.interpretReply(reply))
+    }
+
+    @Test
+    fun errorReplyShowsCodeAndMessage() {
+        val reply = Decoded.Ok("e1", ErrorMessage(ErrorCodes.VERSION_MISMATCH, "expected 1", ref = "h1"))
+        assertEquals(
+            HelloResult.Failed("server refused: version_mismatch (expected 1)"),
+            Handshake.interpretReply(reply),
+        )
+    }
+
+    @Test
+    fun anyOtherReplyMeansFailed() {
+        for (reply in listOf(
+            Decoded.Ok("h2", Hello("x", "y", PROTOCOL_VERSION)),
+            Decoded.UnsupportedType("t1", "transferOffer"),
+            Decoded.UnsupportedVersion("v1", 2),
+            Decoded.Malformed("bad"),
+        )) {
+            assertIs<HelloResult.Failed>(Handshake.interpretReply(reply), "for $reply")
+        }
+    }
 }

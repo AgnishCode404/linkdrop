@@ -14,6 +14,12 @@ data class LocalDevice(
     fun helloAck() = HelloAck(deviceId, deviceName, PROTOCOL_VERSION, features, maxChunkBytes)
 }
 
+/** Outcome of the client's hello, as shown to the user. */
+sealed interface HelloResult {
+    data class Connected(val serverName: String) : HelloResult
+    data class Failed(val reason: String) : HelloResult
+}
+
 object Handshake {
     /**
      * Server side: the reply to a peer's [Hello]. Returns [HelloAck] if the peer is compatible,
@@ -32,6 +38,21 @@ object Handshake {
             return ErrorMessage(code = ErrorCodes.BAD_REQUEST, message = problem, ref = helloId)
         }
         return local.helloAck()
+    }
+
+    /** Client side: turns the server's first reply into a result to show the user. */
+    fun interpretReply(reply: Decoded): HelloResult = when (reply) {
+        is Decoded.Ok -> when (val message = reply.message) {
+            is HelloAck -> checkAck(message)?.let { HelloResult.Failed(it) }
+                ?: HelloResult.Connected(message.deviceName)
+            is ErrorMessage -> HelloResult.Failed(
+                "server refused: ${message.code}" + (message.message?.let { " ($it)" } ?: ""),
+            )
+            else -> HelloResult.Failed("unexpected reply from server")
+        }
+        is Decoded.UnsupportedType -> HelloResult.Failed("unexpected reply from server: ${reply.type}")
+        is Decoded.UnsupportedVersion -> HelloResult.Failed("server uses envelope version ${reply.version}")
+        is Decoded.Malformed -> HelloResult.Failed("unreadable reply from server")
     }
 
     /** Client side: checks the server's [HelloAck]. Returns a problem description, or null if OK. */

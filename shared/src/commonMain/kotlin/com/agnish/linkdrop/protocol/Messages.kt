@@ -13,6 +13,9 @@ const val DEFAULT_PORT = 47800
 /** Largest binary chunk this implementation sends or accepts (used from Slice B). */
 const val DEFAULT_MAX_CHUNK_BYTES = 64 * 1024
 
+/** Largest WebSocket frame accepted: one binary chunk plus its 4-byte header (see PROTOCOL.md). */
+const val MAX_FRAME_BYTES = DEFAULT_MAX_CHUNK_BYTES + 4
+
 /**
  * A control message, carried as the `body` of a JSON envelope in a WebSocket text frame.
  *
