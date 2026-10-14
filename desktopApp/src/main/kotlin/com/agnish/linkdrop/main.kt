@@ -31,6 +31,7 @@ fun main() {
     val server = HelloServer(local, DEFAULT_PORT, log::add)
     val startError = runCatching { server.start() }.exceptionOrNull()
     if (startError == null) log.add("Server started on port $DEFAULT_PORT")
+    val addresses = DesktopDevice.lanAddresses()
 
     application {
         Window(
@@ -40,7 +41,7 @@ fun main() {
             },
             title = "LinkDrop",
         ) {
-            DesktopScreen(local, DesktopDevice.lanAddresses(), startError, log)
+            DesktopScreen(local, addresses, startError, log)
         }
     }
 }

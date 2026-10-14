@@ -14,6 +14,8 @@ Code: `shared/src/commonMain/kotlin/com/agnish/linkdrop/protocol/`.
   nothing below this section.
 - **Text frames** carry control messages (JSON, UTF-8).
 - **Binary frames** carry file bytes (from Slice B).
+- Frames larger than the receiver's own `maxChunkBytes + 4` bytes (one chunk plus its
+  header, see below) are refused by the WebSocket layer and end the connection.
 - The desktop listens and the phone connects. After the handshake **either side may send
   files**, so who connects does not decide the direction of a transfer.
 
@@ -39,7 +41,7 @@ Every text frame is exactly one JSON object:
    session open.
 3. **Other `v`**: reply `error{code:"version_mismatch"}` and close.
 4. **Malformed frame** (bad JSON, missing or wrongly typed required field): reply
-   `error{code:"malformed"}`. A peer may close after repeated malformed frames.
+   `error{code:"malformed"}`. The third malformed frame in a session also closes it.
 5. New optional fields and new message types may be added within version 1 only if the
    new behavior is advertised in `features` (see `hello`) and older peers stay correct
    when they ignore it.
@@ -48,6 +50,15 @@ Every text frame is exactly one JSON object:
 
 The connecting side sends `hello`. The listening side answers `helloAck` or `error`. No
 other message may be sent before the handshake completes.
+
+The handshake is strict. The listening side answers with `error` and closes when the first
+frame is:
+- not a text frame, or does not arrive within 10 seconds (closed without `error`),
+- malformed (`malformed`),
+- of another envelope `v` (`version_mismatch`),
+- any type other than `hello`, including unknown types (`bad_request`).
+
+Rule 2 above (unknown types keep the session open) applies only after the handshake.
 
 ### `hello` / `helloAck`
 
@@ -120,6 +131,8 @@ Transfer error codes: `rejected`, `cancelled`, `checksum_mismatch`, `size_mismat
 +------------------+------------------------------+
 ```
 
+- Allowed only if both sides listed `"transfer"` in the handshake. Otherwise any binary
+  frame gets `error{code:"bad_request"}` and the connection is closed.
 - Allowed only between `fileBegin` and `fileEnd` for that `fileId`.
 - Bytes are appended in order. The position in the file is implied.
 - A frame for any other `fileId`, or a frame larger than the agreed `maxChunkBytes`, is a

@@ -104,6 +104,32 @@ class HelloServerTest {
     }
 
     @Test
+    fun repeatedMalformedFramesCloseTheSession() = serverTest {
+        sendText(hello())
+        assertIs<HelloAck>(receiveMessage())
+
+        repeat(MAX_MALFORMED_FRAMES) {
+            sendText("not json")
+            assertEquals(ErrorCodes.MALFORMED, assertIs<ErrorMessage>(receiveMessage()).code)
+        }
+        assertClosed()
+    }
+
+    @Test
+    fun fewerMalformedFramesKeepSessionOpen() = serverTest {
+        sendText(hello())
+        assertIs<HelloAck>(receiveMessage())
+
+        repeat(MAX_MALFORMED_FRAMES - 1) {
+            sendText("not json")
+            assertEquals(ErrorCodes.MALFORMED, assertIs<ErrorMessage>(receiveMessage()).code)
+        }
+        // Still open: an unknown type is still answered.
+        sendText("""{"v":1,"type":"cancel","id":"t1","body":{}}""")
+        assertEquals("t1", assertIs<ErrorMessage>(receiveMessage()).ref)
+    }
+
+    @Test
     fun binaryFrameWithoutTransferFeatureIsRejected() = serverTest {
         sendText(hello())
         assertIs<HelloAck>(receiveMessage())

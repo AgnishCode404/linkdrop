@@ -35,6 +35,9 @@ const val MAX_FRAME_BYTES = DEFAULT_MAX_CHUNK_BYTES + 4
 
 private val HELLO_TIMEOUT = 10.seconds
 
+/** The session is closed on this many malformed frames (PROTOCOL.md, compatibility rule 4). */
+const val MAX_MALFORMED_FRAMES = 3
+
 /** The desktop's WebSocket server. Slice A: plaintext `ws://`, answers the hello handshake. */
 class HelloServer(
     private val local: LocalDevice,
@@ -78,6 +81,7 @@ private suspend fun DefaultWebSocketServerSession.handleSession(local: LocalDevi
     log("Hello from \"$peerName\" ($peer)")
 
     // Slice A has no messages after the handshake; answer anything that arrives per PROTOCOL.md.
+    var malformedFrames = 0
     for (frame in incoming) {
         when (frame) {
             is Frame.Text -> when (val decoded = ProtocolCodec.decode(frame.readText())) {
@@ -91,7 +95,16 @@ private suspend fun DefaultWebSocketServerSession.handleSession(local: LocalDevi
                     reject(ErrorMessage(ErrorCodes.VERSION_MISMATCH, ref = decoded.id))
                     break
                 }
-                is Decoded.Malformed -> sendMessage(ErrorMessage(ErrorCodes.MALFORMED, decoded.reason))
+                is Decoded.Malformed -> {
+                    val error = ErrorMessage(ErrorCodes.MALFORMED, decoded.reason)
+                    if (++malformedFrames < MAX_MALFORMED_FRAMES) {
+                        sendMessage(error)
+                    } else {
+                        log("Closing \"$peerName\": too many malformed frames")
+                        reject(error)
+                        break
+                    }
+                }
             }
             // No "transfer" feature yet, so binary frames are a protocol error.
             is Frame.Binary -> {
