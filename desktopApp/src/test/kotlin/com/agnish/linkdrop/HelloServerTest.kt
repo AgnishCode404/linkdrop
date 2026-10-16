@@ -11,6 +11,7 @@ import com.agnish.linkdrop.protocol.PROTOCOL_VERSION
 import com.agnish.linkdrop.protocol.ProtocolCodec
 import com.agnish.linkdrop.protocol.SESSION_PATH
 import com.agnish.linkdrop.protocol.TransportConfig
+import com.agnish.linkdrop.transfer.TransferSession
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
@@ -55,7 +56,7 @@ class HelloServerTest {
 
     @Test
     fun tlsConfigRefusesToStartInsteadOfServingPlaintext() {
-        val server = HelloServer(desktop, port = 0, TransportConfig.Tls("ab12")) { logLines += it }
+        val server = HelloServer(desktop, port = 0, TransportConfig.Tls("ab12"), ServerHooks()) { logLines += it }
         val error = assertFailsWith<IllegalStateException> { server.start() }
         assertEquals("TLS is not implemented yet", error.message)
     }
@@ -117,7 +118,7 @@ class HelloServerTest {
         sendText(hello())
         assertIs<HelloAck>(receiveMessage())
 
-        repeat(MAX_MALFORMED_FRAMES) {
+        repeat(TransferSession.MAX_MALFORMED_FRAMES) {
             sendText("not json")
             assertEquals(ErrorCodes.MALFORMED, assertIs<ErrorMessage>(receiveMessage()).code)
         }
@@ -129,7 +130,7 @@ class HelloServerTest {
         sendText(hello())
         assertIs<HelloAck>(receiveMessage())
 
-        repeat(MAX_MALFORMED_FRAMES - 1) {
+        repeat(TransferSession.MAX_MALFORMED_FRAMES - 1) {
             sendText("not json")
             assertEquals(ErrorCodes.MALFORMED, assertIs<ErrorMessage>(receiveMessage()).code)
         }

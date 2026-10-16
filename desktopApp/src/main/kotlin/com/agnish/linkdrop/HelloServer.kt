@@ -11,6 +11,9 @@ import com.agnish.linkdrop.protocol.Message
 import com.agnish.linkdrop.protocol.ProtocolCodec
 import com.agnish.linkdrop.protocol.SESSION_PATH
 import com.agnish.linkdrop.protocol.TransportConfig
+import com.agnish.linkdrop.transfer.FileSink
+import com.agnish.linkdrop.transfer.OfferDecider
+import com.agnish.linkdrop.transfer.TransferSession
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.engine.EmbeddedServer
@@ -33,14 +36,21 @@ import kotlin.time.Duration.Companion.seconds
 
 private val HELLO_TIMEOUT = 10.seconds
 
-/** The session is closed on this many malformed frames (PROTOCOL.md, compatibility rule 4). */
-const val MAX_MALFORMED_FRAMES = 3
+/** What the server does with a phone once the handshake succeeded. */
+class ServerHooks(
+    /** Where received files go; null means this server cannot receive. */
+    val sink: FileSink? = null,
+    val decider: OfferDecider = OfferDecider { false },
+    val onConnected: (PeerConnection) -> Unit = {},
+    val onDisconnected: (PeerConnection) -> Unit = {},
+)
 
-/** The desktop's WebSocket server. Answers the hello handshake. */
+/** The desktop's WebSocket server: the hello handshake, then file transfer with the phone. */
 class HelloServer(
     private val local: LocalDevice,
     private val port: Int,
     private val transport: TransportConfig,
+    private val hooks: ServerHooks,
     private val log: (String) -> Unit,
 ) {
     private var server: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
@@ -50,7 +60,7 @@ class HelloServer(
         // Never fall back: a TLS config must not turn into a plaintext server.
         check(transport is TransportConfig.Plaintext) { "TLS is not implemented yet" }
         server = embeddedServer(Netty, port = port, host = "0.0.0.0") {
-            linkDropModule(local, log)
+            linkDropModule(local, hooks, log)
         }.start(wait = false)
     }
 
@@ -61,7 +71,7 @@ class HelloServer(
 }
 
 /** Installs WebSockets and the session route. Separate from [HelloServer] so tests can use it. */
-fun Application.linkDropModule(local: LocalDevice, log: (String) -> Unit) {
+fun Application.linkDropModule(local: LocalDevice, hooks: ServerHooks = ServerHooks(), log: (String) -> Unit) {
     install(WebSockets) {
         pingPeriod = 15.seconds
         timeout = 30.seconds
@@ -69,61 +79,50 @@ fun Application.linkDropModule(local: LocalDevice, log: (String) -> Unit) {
     }
     routing {
         webSocket(SESSION_PATH) {
-            handleSession(local, log)
+            handleSession(local, hooks, log)
         }
     }
 }
 
-private suspend fun DefaultWebSocketServerSession.handleSession(local: LocalDevice, log: (String) -> Unit) {
+private suspend fun DefaultWebSocketServerSession.handleSession(
+    local: LocalDevice,
+    hooks: ServerHooks,
+    log: (String) -> Unit,
+) {
     val peer = call.request.origin.remoteAddress
     log("Connection from $peer")
 
-    val peerName = handshake(local, peer, log) ?: return
-    log("Hello from \"$peerName\" ($peer)")
+    val hello = handshake(local, peer, log) ?: return
+    log("Hello from \"${hello.deviceName}\" ($peer)")
 
-    // Slice A has no messages after the handshake; answer anything that arrives per PROTOCOL.md.
-    var malformedFrames = 0
-    for (frame in incoming) {
-        when (frame) {
-            is Frame.Text -> when (val decoded = ProtocolCodec.decode(frame.readText())) {
-                is Decoded.Ok -> when (val message = decoded.message) {
-                    is ErrorMessage -> log("Error from \"$peerName\": ${message.code}")
-                    else -> sendMessage(ErrorMessage(ErrorCodes.BAD_REQUEST, "unexpected message", decoded.id))
-                }
-                is Decoded.UnsupportedType ->
-                    sendMessage(ErrorMessage(ErrorCodes.UNSUPPORTED_TYPE, decoded.type, decoded.id))
-                is Decoded.UnsupportedVersion -> {
-                    reject(ErrorMessage(ErrorCodes.VERSION_MISMATCH, ref = decoded.id))
-                    break
-                }
-                is Decoded.Malformed -> {
-                    val error = ErrorMessage(ErrorCodes.MALFORMED, decoded.reason)
-                    if (++malformedFrames < MAX_MALFORMED_FRAMES) {
-                        sendMessage(error)
-                    } else {
-                        log("Closing \"$peerName\": too many malformed frames")
-                        reject(error)
-                        break
-                    }
-                }
-            }
-            // No "transfer" feature yet, so binary frames are a protocol error.
-            is Frame.Binary -> {
-                reject(ErrorMessage(ErrorCodes.BAD_REQUEST, "binary frame without transfer"))
-                break
-            }
-            else -> Unit
-        }
+    // From here on, the shared engine handles every frame (including broken ones, per PROTOCOL.md).
+    val transferEnabled = TransferSession.agreed(local.features, hello.features)
+    val session = TransferSession(
+        channel = KtorFrameChannel(this),
+        peerName = hello.deviceName,
+        transferEnabled = transferEnabled,
+        sendChunkBytes = TransferSession.sendChunkBytes(local.maxChunkBytes, hello.maxChunkBytes),
+        receiveChunkBytes = local.maxChunkBytes,
+        sink = hooks.sink,
+        decider = hooks.decider,
+        log = log,
+    )
+    val connection = PeerConnection(hello.deviceName, peer, session, transferEnabled)
+    hooks.onConnected(connection)
+    try {
+        session.run()
+    } finally {
+        hooks.onDisconnected(connection)
+        log("Disconnected: \"${hello.deviceName}\" ($peer)")
     }
-    log("Disconnected: \"$peerName\" ($peer)")
 }
 
-/** Waits for the peer's hello and replies. Returns the peer's name, or null if the session was closed. */
+/** Waits for the peer's hello and replies. Returns the hello, or null if the session was closed. */
 private suspend fun DefaultWebSocketServerSession.handshake(
     local: LocalDevice,
     peer: String,
     log: (String) -> Unit,
-): String? {
+): Hello? {
     val first = withTimeoutOrNull(HELLO_TIMEOUT) { incoming.receiveCatching().getOrNull() }
     if (first !is Frame.Text) {
         log("Rejected $peer: no hello")
@@ -141,7 +140,7 @@ private suspend fun DefaultWebSocketServerSession.handshake(
                     is ErrorMessage -> reply
                     else -> {
                         sendMessage(reply)
-                        return hello.deviceName
+                        return hello
                     }
                 }
             }

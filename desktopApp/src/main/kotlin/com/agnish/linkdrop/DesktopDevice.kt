@@ -1,5 +1,6 @@
 package com.agnish.linkdrop
 
+import com.agnish.linkdrop.protocol.FEATURE_TRANSFER
 import com.agnish.linkdrop.protocol.LocalDevice
 import com.agnish.linkdrop.protocol.MAX_DEVICE_FIELD_LENGTH
 import java.io.File
@@ -13,7 +14,8 @@ object DesktopDevice {
     private const val KEY_DEVICE_ID = "deviceId"
 
     /** This desktop's identity. The ID is random, created on first run and then kept. */
-    fun load(): LocalDevice = LocalDevice(deviceId = loadOrCreateDeviceId(), deviceName = deviceName())
+    fun load(): LocalDevice =
+        LocalDevice(deviceId = loadOrCreateDeviceId(), deviceName = deviceName(), features = listOf(FEATURE_TRANSFER))
 
     private fun loadOrCreateDeviceId(): String {
         val prefs = Preferences.userRoot().node(PREFS_NODE)

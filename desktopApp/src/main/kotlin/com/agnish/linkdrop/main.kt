@@ -2,36 +2,53 @@ package com.agnish.linkdrop
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
+import androidx.compose.ui.window.rememberWindowState
 import com.agnish.linkdrop.protocol.DEFAULT_PORT
 import com.agnish.linkdrop.protocol.LocalDevice
+import com.agnish.linkdrop.protocol.TransferLimits
 import com.agnish.linkdrop.protocol.TransportConfig
+import java.awt.FileDialog
+import java.awt.Frame
+import java.nio.file.Files
+import java.nio.file.Path
 
 fun main() {
     val log = EventLog()
     val local = DesktopDevice.load()
+    val receiveDir = DesktopFiles.receiveDir()
+    val sink = FolderSink(receiveDir).also { runCatching { it.deleteLeftovers() } }
+    val state = DesktopState()
+    val hooks = ServerHooks(sink, state.decider, state::connected, state::disconnected)
+
     // BuildFlags is generated from linkdrop.allowPlaintext (see desktopApp/build.gradle.kts).
     val transport = TransportConfig.choose(BuildFlags.ALLOW_PLAINTEXT, pinnedCertSha256 = null)
-    val server = transport?.let { HelloServer(local, DEFAULT_PORT, it, log::add) }
+    val server = transport?.let { HelloServer(local, DEFAULT_PORT, it, hooks, log::add) }
     val startError = if (server == null) {
         TransportConfig.NO_TRANSPORT_MESSAGE
     } else {
@@ -48,10 +65,40 @@ fun main() {
                 exitApplication()
             },
             title = "LinkDrop",
+            state = rememberWindowState(width = 760.dp, height = 820.dp),
         ) {
-            DesktopScreen(local, addresses, transport, startError, log)
+            // Bring the window forward when a phone wants to send something.
+            val offers by state.offers.collectAsState()
+            LaunchedEffect(offers.size) { if (offers.isNotEmpty()) window.toFront() }
+
+            DesktopScreen(
+                local, addresses, transport, startError, receiveDir, state, log,
+                onSendFiles = { connection -> sendPickedFiles(window, connection, log) },
+                onOpenFolder = { openFolder(receiveDir, log) },
+            )
         }
     }
+}
+
+/** Lets the user pick files (system file chooser) and queues them for [connection]. */
+private fun sendPickedFiles(parent: Frame, connection: PeerConnection, log: EventLog) {
+    val dialog = FileDialog(parent, "Choose files to send to \"${connection.name}\"", FileDialog.LOAD)
+    dialog.isMultipleMode = true
+    dialog.isVisible = true // blocks until the user closes the dialog
+    val sources = dialog.files.mapNotNull { file ->
+        val path = file.toPath()
+        if (!Files.isRegularFile(path)) return@mapNotNull null
+        runCatching { PathSource(path) }.onFailure { log.add("Cannot read $path: ${it.message}") }.getOrNull()
+    }
+    // One offer holds at most MAX_FILES_PER_OFFER files; larger selections become several queued offers.
+    sources.chunked(TransferLimits.MAX_FILES_PER_OFFER).forEach { connection.session.send(it) }
+}
+
+private fun openFolder(dir: Path, log: EventLog) {
+    runCatching {
+        Files.createDirectories(dir)
+        ProcessBuilder("xdg-open", dir.toString()).start()
+    }.onFailure { log.add("Could not open $dir: ${it.message}") }
 }
 
 @Composable
@@ -60,18 +107,20 @@ fun DesktopScreen(
     addresses: List<String>,
     transport: TransportConfig?,
     startError: String?,
+    receiveDir: Path,
+    state: DesktopState,
     log: EventLog,
+    onSendFiles: (PeerConnection) -> Unit,
+    onOpenFolder: () -> Unit,
 ) {
-    val entries by log.entries.collectAsState()
-    val listState = rememberLazyListState()
-    LaunchedEffect(entries.size) {
-        if (entries.isNotEmpty()) listState.animateScrollToItem(entries.lastIndex)
-    }
+    val connections by state.connections.collectAsState()
+    val offers by state.offers.collectAsState()
+    val history by state.history.collectAsState()
 
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
             Column(
-                modifier = Modifier.padding(16.dp),
+                modifier = Modifier.padding(16.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text("LinkDrop", style = MaterialTheme.typography.headlineSmall)
@@ -99,14 +148,44 @@ fun DesktopScreen(
                         }
                     }
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Received files go to $receiveDir", modifier = Modifier.weight(1f))
+                    TextButton(onClick = onOpenFolder) { Text("Open folder") }
+                }
+
+                offers.forEach { OfferCard(it) }
+
+                HorizontalDivider()
+                Text("Phones", style = MaterialTheme.typography.titleMedium)
+                if (connections.isEmpty()) {
+                    Text("No phone connected. Tap Connect in the LinkDrop app on your phone.")
+                }
+                connections.forEach { PhoneCard(it, onSend = { onSendFiles(it) }) }
+
+                if (history.isNotEmpty()) {
+                    Text("Earlier", style = MaterialTheme.typography.titleMedium)
+                    history.asReversed().forEach { TransferCard(it.peerName, it.progress, onCancel = null) }
+                }
+
                 HorizontalDivider()
                 Text("Log", style = MaterialTheme.typography.titleMedium)
-                SelectionContainer {
-                    LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
-                        items(entries) { Text(it, fontFamily = FontFamily.Monospace) }
-                    }
-                }
+                LogView(log)
             }
+        }
+    }
+}
+
+@Composable
+private fun LogView(log: EventLog) {
+    val entries by log.entries.collectAsState()
+    val listState = rememberLazyListState()
+    LaunchedEffect(entries.size) {
+        if (entries.isNotEmpty()) listState.animateScrollToItem(entries.lastIndex)
+    }
+    SelectionContainer {
+        // Fixed height: a scrolling list cannot sit inside the scrolling page without one.
+        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().height(180.dp)) {
+            items(entries) { Text(it, fontFamily = FontFamily.Monospace) }
         }
     }
 }
