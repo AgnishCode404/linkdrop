@@ -22,8 +22,7 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.ui)
 
-    implementation(libs.ktor.clientOkhttp)
-    implementation(libs.ktor.clientWebsockets)
+    implementation(libs.okhttp)
 
     // JVM unit tests: HelloClient against a local fake WebSocket server.
     testImplementation(libs.kotlin.testJunit)
