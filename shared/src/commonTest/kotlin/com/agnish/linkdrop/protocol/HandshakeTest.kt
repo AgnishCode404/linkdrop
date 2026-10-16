@@ -79,7 +79,7 @@ class HandshakeTest {
     fun anyOtherReplyMeansFailed() {
         for (reply in listOf(
             Decoded.Ok("h2", Hello("x", "y", PROTOCOL_VERSION)),
-            Decoded.UnsupportedType("t1", "transferOffer"),
+            Decoded.UnsupportedType("t1", "futureThing"),
             Decoded.UnsupportedVersion("v1", 2),
             Decoded.Malformed("bad"),
         )) {

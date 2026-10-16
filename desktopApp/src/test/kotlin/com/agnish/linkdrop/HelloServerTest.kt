@@ -102,13 +102,13 @@ class HelloServerTest {
         sendText(hello())
         assertIs<HelloAck>(receiveMessage())
 
-        sendText("""{"v":1,"type":"transferOffer","id":"t1","body":{}}""")
+        sendText("""{"v":1,"type":"futureThing","id":"t1","body":{}}""")
         val error = assertIs<ErrorMessage>(receiveMessage())
         assertEquals(ErrorCodes.UNSUPPORTED_TYPE, error.code)
         assertEquals("t1", error.ref)
 
         // Still open: a second unknown message gets a second answer.
-        sendText("""{"v":1,"type":"cancel","id":"t2","body":{}}""")
+        sendText("""{"v":1,"type":"futureThing","id":"t2","body":{}}""")
         assertEquals("t2", assertIs<ErrorMessage>(receiveMessage()).ref)
     }
 
@@ -134,7 +134,7 @@ class HelloServerTest {
             assertEquals(ErrorCodes.MALFORMED, assertIs<ErrorMessage>(receiveMessage()).code)
         }
         // Still open: an unknown type is still answered.
-        sendText("""{"v":1,"type":"cancel","id":"t1","body":{}}""")
+        sendText("""{"v":1,"type":"futureThing","id":"t1","body":{}}""")
         assertEquals("t1", assertIs<ErrorMessage>(receiveMessage()).ref)
     }
 

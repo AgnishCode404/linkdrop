@@ -92,9 +92,13 @@ The listening side rejects with:
   a queue means offering a list.
 - To add more files while a transfer is running, send **another `transferOffer`**.
   Offers are handled in the order they were sent.
-- **At most one file is open per session at a time.** The next file starts only after
+- **At most one file is open per direction at a time.** The next file starts only after
   the receiver has answered the previous one with `fileResult`. Because of this, binary
   frames never interleave and need no offset.
+- The two directions are independent: each side may be sending one transfer while
+  receiving another. Every binary frame a peer receives belongs to the file the *other*
+  side has open, so frames from the two directions are never confused. `transferId`
+  values only need to be unique per sender.
 
 ### Messages, in order
 
@@ -123,6 +127,17 @@ sender                                   receiver
 Transfer error codes: `rejected`, `cancelled`, `checksum_mismatch`, `size_mismatch`,
 `too_large`, `io_error`, `unknown_transfer`.
 
+Details:
+- `fileId` is in `0..2147483647` (it must fit the 32-bit header with the top bit clear).
+- If no file is accepted, the sender sends `transferDone` right away, with no `fileBegin`.
+- An empty file (`size: 0`) is `fileBegin`, no binary frames, then `fileEnd` with the
+  SHA-256 of zero bytes.
+- An invalid offer (more than 1000 files, repeated `fileId`, negative `size`, empty
+  `files`) is answered with `error{code:"bad_request", ref:<offer id>}` instead of a
+  `transferResponse`. The sender treats the whole transfer as rejected.
+- The receiver may decline an offer the user has not answered within 120 seconds
+  (all `accept:false`).
+
 ### Binary frames
 
 ```
@@ -141,11 +156,22 @@ Transfer error codes: `rejected`, `cancelled`, `checksum_mismatch`, `size_mismat
 
 ### Receiver rules (security)
 
-- `name` is untrusted. Keep only the final path component. Reject `.`, `..`, empty names,
-  path separators and control characters. Never overwrite an existing file; pick a new
-  name instead.
+- `name` is untrusted (implemented by `FileNames.clean` in `shared`):
+  - Keep only the part after the last `/` or `\`.
+  - Reject names containing control characters or invisible formatting characters (for
+    example the right-to-left override, which can disguise `gpj.exe` as `exe.jpg`).
+  - Remove leading dots (no hidden files) and surrounding spaces; replace `" * : < > ? |`
+    with `_`.
+  - Shorten names over 255 UTF-8 bytes, keeping a short extension.
+  - Reject what is left if it is empty.
+  
+  A rejected name means that file is declined (`accept:false`); the rest of the offer
+  is unaffected.
+- Never overwrite an existing file; pick `name (1).ext`, `name (2).ext`, … instead.
 - Files are written only to the receiver's chosen download location (desktop: one folder
   the user picked; Android: Storage Access Framework or MediaStore).
-- Enforce a size limit before accepting. A file whose received byte count differs from
-  `size`, or whose SHA-256 differs from `fileEnd.sha256`, fails and is deleted.
+- Enforce a size limit before accepting (at least: enough free space for the accepted
+  files). A file whose received byte count differs from `size`, or whose SHA-256 differs
+  from `fileEnd.sha256`, fails and is deleted. Receiving more bytes than `size` fails the
+  file immediately (`size_mismatch`), without waiting for `fileEnd`.
 - Nothing is accepted without the user agreeing first (before `transferResponse`).

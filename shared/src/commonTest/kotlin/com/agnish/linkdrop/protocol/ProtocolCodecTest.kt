@@ -45,8 +45,8 @@ class ProtocolCodecTest {
 
     @Test
     fun unknownTypeIsReportedNotFailed() {
-        val decoded = ProtocolCodec.decode("""{"v":1,"type":"transferOffer","id":"t1","body":{"files":[]}}""")
-        assertEquals(Decoded.UnsupportedType("t1", "transferOffer"), decoded)
+        val decoded = ProtocolCodec.decode("""{"v":1,"type":"futureThing","id":"t1","body":{"files":[]}}""")
+        assertEquals(Decoded.UnsupportedType("t1", "futureThing"), decoded)
     }
 
     @Test

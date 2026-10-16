@@ -43,10 +43,19 @@ object ProtocolCodec {
     fun newMessageId(): String = Uuid.random().toString()
 
     fun encode(message: Message, id: String = newMessageId()): String {
+        // Exhaustive on purpose: a new Message type does not compile until it is listed here.
         val (type, body) = when (message) {
             is Hello -> TYPE_HELLO to json.encodeToJsonElement(Hello.serializer(), message)
             is HelloAck -> TYPE_HELLO_ACK to json.encodeToJsonElement(HelloAck.serializer(), message)
             is ErrorMessage -> TYPE_ERROR to json.encodeToJsonElement(ErrorMessage.serializer(), message)
+            is TransferOffer -> TYPE_TRANSFER_OFFER to json.encodeToJsonElement(TransferOffer.serializer(), message)
+            is TransferResponse ->
+                TYPE_TRANSFER_RESPONSE to json.encodeToJsonElement(TransferResponse.serializer(), message)
+            is FileBegin -> TYPE_FILE_BEGIN to json.encodeToJsonElement(FileBegin.serializer(), message)
+            is FileEnd -> TYPE_FILE_END to json.encodeToJsonElement(FileEnd.serializer(), message)
+            is FileResult -> TYPE_FILE_RESULT to json.encodeToJsonElement(FileResult.serializer(), message)
+            is Cancel -> TYPE_CANCEL to json.encodeToJsonElement(Cancel.serializer(), message)
+            is TransferDone -> TYPE_TRANSFER_DONE to json.encodeToJsonElement(TransferDone.serializer(), message)
         }
         return json.encodeToString(Envelope.serializer(), Envelope(PROTOCOL_VERSION, type, id, body.jsonObject))
     }
@@ -68,6 +77,13 @@ object ProtocolCodec {
             TYPE_HELLO -> Hello.serializer()
             TYPE_HELLO_ACK -> HelloAck.serializer()
             TYPE_ERROR -> ErrorMessage.serializer()
+            TYPE_TRANSFER_OFFER -> TransferOffer.serializer()
+            TYPE_TRANSFER_RESPONSE -> TransferResponse.serializer()
+            TYPE_FILE_BEGIN -> FileBegin.serializer()
+            TYPE_FILE_END -> FileEnd.serializer()
+            TYPE_FILE_RESULT -> FileResult.serializer()
+            TYPE_CANCEL -> Cancel.serializer()
+            TYPE_TRANSFER_DONE -> TransferDone.serializer()
             else -> return Decoded.UnsupportedType(envelope.id, envelope.type)
         }
 
@@ -83,4 +99,11 @@ object ProtocolCodec {
     private const val TYPE_HELLO = "hello"
     private const val TYPE_HELLO_ACK = "helloAck"
     private const val TYPE_ERROR = "error"
+    private const val TYPE_TRANSFER_OFFER = "transferOffer"
+    private const val TYPE_TRANSFER_RESPONSE = "transferResponse"
+    private const val TYPE_FILE_BEGIN = "fileBegin"
+    private const val TYPE_FILE_END = "fileEnd"
+    private const val TYPE_FILE_RESULT = "fileResult"
+    private const val TYPE_CANCEL = "cancel"
+    private const val TYPE_TRANSFER_DONE = "transferDone"
 }
