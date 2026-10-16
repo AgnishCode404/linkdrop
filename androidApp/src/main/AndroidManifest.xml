@@ -8,6 +8,7 @@
     <!-- No backups: pairing keys stored by later slices must never leave the device.
          Cleartext (ws://) is allowed only by the debug build's network_security_config. -->
     <application
+        android:name=".LinkDropApplication"
         android:allowBackup="false"
         android:networkSecurityConfig="@xml/network_security_config"
         android:icon="@mipmap/ic_launcher"

@@ -41,6 +41,16 @@ class HelloClientTest {
     private val desktop = LocalDevice("desk-1", "Fake desktop")
     private val receivedHellos = CopyOnWriteArrayList<Hello>()
 
+    /** Connects, turns the outcome into a [HelloResult] (as the UI shows it), and hangs up. */
+    private suspend fun connectOnce(address: ServerAddress, local: LocalDevice, transport: TransportConfig): HelloResult =
+        when (val result = HelloClient.connect(address, local, transport)) {
+            is ConnectResult.Opened -> {
+                result.channel.close()
+                HelloResult.Connected(result.ack.deviceName)
+            }
+            is ConnectResult.Failed -> HelloResult.Failed(result.reason)
+        }
+
     /** Starts a fake server whose replies are decided by [reply], runs the client once, stops the server. */
     private fun sayHelloTo(reply: suspend DefaultWebSocketServerSession.(hello: Decoded) -> Unit): HelloResult {
         val server = embeddedServer(Netty, port = 0, host = "127.0.0.1") {
@@ -57,7 +67,7 @@ class HelloClientTest {
         try {
             return runBlocking {
                 val port = server.engine.resolvedConnectors().first().port
-                HelloClient.sayHello(ServerAddress("127.0.0.1", port), phone, TransportConfig.Plaintext)
+                connectOnce(ServerAddress("127.0.0.1", port), phone, TransportConfig.Plaintext)
             }
         } finally {
             server.stop(gracePeriodMillis = 0, timeoutMillis = 1_000)
@@ -115,7 +125,7 @@ class HelloClientTest {
         // The exact TLS message proves the client refused before trying plaintext.
         val freePort = ServerSocket(0).use { it.localPort }
         val result = runBlocking {
-            HelloClient.sayHello(ServerAddress("127.0.0.1", freePort), phone, TransportConfig.Tls("ab12"))
+            connectOnce(ServerAddress("127.0.0.1", freePort), phone, TransportConfig.Tls("ab12"))
         }
         assertEquals(HelloResult.Failed("TLS is not implemented yet"), result)
     }
@@ -123,7 +133,7 @@ class HelloClientTest {
     @Test
     fun nothingListeningIsReported() {
         val freePort = ServerSocket(0).use { it.localPort }
-        val result = runBlocking { HelloClient.sayHello(ServerAddress("127.0.0.1", freePort), phone, TransportConfig.Plaintext) }
+        val result = runBlocking { connectOnce(ServerAddress("127.0.0.1", freePort), phone, TransportConfig.Plaintext) }
         val failed = assertIs<HelloResult.Failed>(result)
         assertTrue("could not connect" in failed.reason, failed.reason)
     }

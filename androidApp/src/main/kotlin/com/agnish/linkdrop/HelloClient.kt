@@ -1,6 +1,8 @@
 package com.agnish.linkdrop
 
+import com.agnish.linkdrop.protocol.Decoded
 import com.agnish.linkdrop.protocol.Handshake
+import com.agnish.linkdrop.protocol.HelloAck
 import com.agnish.linkdrop.protocol.HelloResult
 import com.agnish.linkdrop.protocol.LocalDevice
 import com.agnish.linkdrop.protocol.MAX_FRAME_BYTES
@@ -23,7 +25,15 @@ import kotlin.time.Duration.Companion.seconds
 
 private val HELLO_TIMEOUT = 10.seconds
 
-/** Slice A client: connects to the desktop, sends hello, reports the reply, disconnects. */
+/** Result of [HelloClient.connect]. */
+sealed interface ConnectResult {
+    /** Handshake done; [channel] stays open for the transfer session. */
+    class Opened(val channel: OkHttpFrameChannel, val ack: HelloAck) : ConnectResult
+
+    data class Failed(val reason: String) : ConnectResult
+}
+
+/** Connects to the desktop and does the hello handshake. */
 object HelloClient {
 
     /** One OkHttpClient for the whole app, as OkHttp recommends (it shares threads and connections). */
@@ -35,34 +45,49 @@ object HelloClient {
             .build()
     }
 
-    suspend fun sayHello(address: ServerAddress, local: LocalDevice, transport: TransportConfig): HelloResult {
+    suspend fun connect(
+        address: ServerAddress,
+        local: LocalDevice,
+        transport: TransportConfig,
+        client: OkHttpClient = okHttp,
+    ): ConnectResult {
         // Never fall back: a TLS config must not turn into a plaintext connection.
-        if (transport is TransportConfig.Tls) return HelloResult.Failed("TLS is not implemented yet")
+        if (transport is TransportConfig.Tls) return ConnectResult.Failed("TLS is not implemented yet")
 
         var channel: OkHttpFrameChannel? = null
-        return try {
-            withTimeout(HELLO_TIMEOUT) {
+        var result: ConnectResult = ConnectResult.Failed("not connected")
+        try {
+            result = withTimeout(HELLO_TIMEOUT) {
                 // ws:// is additionally blocked outside debug builds by the network security config.
                 val url = "${transport.scheme}://${address.host}:${address.port}$SESSION_PATH"
-                val connected = OkHttpFrameChannel.connect(okHttp, url, MAX_FRAME_BYTES).also { channel = it }
-                connected.sendText(ProtocolCodec.encode(local.hello()))
-                val reply = connected.incoming.receiveCatching()
+                val opened = OkHttpFrameChannel.connect(client, url, MAX_FRAME_BYTES).also { channel = it }
+                opened.sendText(ProtocolCodec.encode(local.hello()))
+                val reply = opened.incoming.receiveCatching()
                 reply.exceptionOrNull()?.let { throw it }
                 when (val frame = reply.getOrNull()) {
-                    is WireFrame.Text -> Handshake.interpretReply(ProtocolCodec.decode(frame.text))
-                    is WireFrame.Binary -> HelloResult.Failed("unexpected reply from server")
-                    null -> HelloResult.Failed("server closed the connection")
+                    is WireFrame.Text -> {
+                        val decoded = ProtocolCodec.decode(frame.text)
+                        when (val outcome = Handshake.interpretReply(decoded)) {
+                            is HelloResult.Connected ->
+                                ConnectResult.Opened(opened, (decoded as Decoded.Ok).message as HelloAck)
+                            is HelloResult.Failed -> ConnectResult.Failed(outcome.reason)
+                        }
+                    }
+                    is WireFrame.Binary -> ConnectResult.Failed("unexpected reply from server")
+                    null -> ConnectResult.Failed("server closed the connection")
                 }
             }
         } catch (e: TimeoutCancellationException) {
-            HelloResult.Failed("no answer within ${HELLO_TIMEOUT.inWholeSeconds} s")
+            result = ConnectResult.Failed("no answer within ${HELLO_TIMEOUT.inWholeSeconds} s")
         } catch (e: CancellationException) {
+            channel?.close(1000, "cancelled")
             throw e
         } catch (e: Exception) {
-            HelloResult.Failed(describe(e))
+            result = ConnectResult.Failed(describe(e))
         } finally {
-            channel?.close(1000, "done")
+            if (result !is ConnectResult.Opened) channel?.close(1000, "done")
         }
+        return result
     }
 
     private fun describe(e: Exception): String = when (e) {
