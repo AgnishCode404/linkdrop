@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">linkdrop</string>
+    <string name="share_label">Send to desktop</string>
 </resources>

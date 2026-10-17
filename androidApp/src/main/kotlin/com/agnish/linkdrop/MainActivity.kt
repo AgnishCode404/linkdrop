@@ -74,14 +74,23 @@ class MainActivity : ComponentActivity() {
         val lastAddress = AndroidDevice.lastAddress(this)
         // ALLOW_PLAINTEXT is false in every release build (see androidApp/build.gradle.kts).
         val transport = TransportConfig.choose(BuildConfig.ALLOW_PLAINTEXT, pinnedCertSha256 = null)
+        // Non-null when opened from another app's share menu.
+        val share = ShareRequest.from(intent)
         setContent {
-            PhoneScreen(local, lastAddress, transport, connection)
+            PhoneScreen(local, lastAddress, transport, connection, share, onShareDone = { finish() })
         }
     }
 }
 
 @Composable
-fun PhoneScreen(local: LocalDevice, lastAddress: String, transport: TransportConfig?, connection: PhoneConnection) {
+fun PhoneScreen(
+    local: LocalDevice,
+    lastAddress: String,
+    transport: TransportConfig?,
+    connection: PhoneConnection,
+    share: ShareRequest? = null,
+    onShareDone: () -> Unit = {},
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by connection.state.collectAsState()
@@ -109,6 +118,39 @@ fun PhoneScreen(local: LocalDevice, lastAddress: String, transport: TransportCon
 
     // If the user denies the permission we still try: on phones that don't enforce it, it works.
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { connect() }
+
+    fun requestConnect() {
+        if (needsLocalNetworkPermission(context)) permissionLauncher.launch(ACCESS_LOCAL_NETWORK) else connect()
+    }
+
+    // ---- Files shared from another app: connect to the last desktop and send them, once. ----
+    // Saved across rotation, so turning the phone never sends the same files twice.
+    var shareConnectTried by rememberSaveable { mutableStateOf(false) }
+    var shareTransferIds by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
+    var shareSources by remember { mutableStateOf<List<UriSource>?>(null) }
+    var shareUnreadable by remember { mutableStateOf(0) }
+
+    LaunchedEffect(share) {
+        if (share !is ShareRequest.Files) return@LaunchedEffect
+        val results = share.uris.map { runCatching { UriSource.from(context, it) } }
+        shareSources = results.mapNotNull { it.getOrNull() }
+        shareUnreadable = share.skipped + results.count { it.isFailure }
+    }
+    LaunchedEffect(share, state, shareSources) {
+        if (share !is ShareRequest.Files || shareTransferIds.isNotEmpty()) return@LaunchedEffect
+        val sources = shareSources ?: return@LaunchedEffect
+        when (val s = state) {
+            is PhoneConnection.State.Disconnected -> if (!shareConnectTried && address != null && transport != null) {
+                shareConnectTried = true
+                requestConnect()
+            }
+            is PhoneConnection.State.Connected -> if (s.transferEnabled && sources.isNotEmpty()) {
+                val ids = sources.chunked(TransferLimits.MAX_FILES_PER_OFFER).map { s.session.send(it) }
+                shareTransferIds = ArrayList(ids)
+            }
+            is PhoneConnection.State.Connecting -> Unit
+        }
+    }
 
     val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         val session = connected?.session ?: return@rememberLauncherForActivityResult
@@ -153,16 +195,9 @@ fun PhoneScreen(local: LocalDevice, lastAddress: String, transport: TransportCon
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        Button(
-                            onClick = {
-                                if (needsLocalNetworkPermission(context)) {
-                                    permissionLauncher.launch(ACCESS_LOCAL_NETWORK)
-                                } else {
-                                    connect()
-                                }
-                            },
-                            enabled = transport != null && address != null,
-                        ) { Text("Connect") }
+                        Button(onClick = { requestConnect() }, enabled = transport != null && address != null) {
+                            Text("Connect")
+                        }
                         s.reason?.let { Text("Not connected: $it", color = MaterialTheme.colorScheme.error) }
                     }
                     is PhoneConnection.State.Connecting -> {
@@ -193,6 +228,32 @@ fun PhoneScreen(local: LocalDevice, lastAddress: String, transport: TransportCon
                     }
                 }
                 problem?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+
+                if (share != null) {
+                    val sources = shareSources
+                    val progress = when {
+                        shareTransferIds.isNotEmpty() -> ShareProgress.Sending(
+                            peerName = connected?.peerName ?: "desktop",
+                            finished = shareTransferIds.all { id ->
+                                (transfers + history).firstOrNull { it.transferId == id }?.finished ?: false
+                            },
+                        )
+                        sources == null -> ShareProgress.Reading
+                        sources.isEmpty() -> ShareProgress.CannotSend("None of the shared files could be read.")
+                        connected != null && !connected.transferEnabled ->
+                            ShareProgress.CannotSend("The desktop's LinkDrop app is too old to transfer files.")
+                        state is PhoneConnection.State.Connecting -> ShareProgress.Connecting
+                        else -> ShareProgress.NeedsAddress
+                    }
+                    ShareCard(
+                        share = share,
+                        fileNames = sources?.map { it.name }.orEmpty(),
+                        totalBytes = sources?.sumOf { it.size } ?: 0L,
+                        unreadable = shareUnreadable,
+                        progress = progress,
+                        onDone = onShareDone,
+                    )
+                }
 
                 offers.forEach { OfferCard(it) }
 
