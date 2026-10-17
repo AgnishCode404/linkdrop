@@ -41,7 +41,11 @@ object HelloClient {
         OkHttpClient.Builder()
             .connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(0, TimeUnit.SECONDS) // a WebSocket may be quiet for long periods
-            .pingInterval(15, TimeUnit.SECONDS) // detects dead connections instead
+            // Detects dead connections instead. OkHttp gives up if a pong has not arrived by the
+            // next ping. While a large file is arriving, the pong waits behind file data until the
+            // phone's storage has written it, so 15 s was too tight; 30 s matches the desktop's
+            // own ping timeout.
+            .pingInterval(30, TimeUnit.SECONDS)
             .build()
     }
 

@@ -17,6 +17,7 @@ import com.agnish.linkdrop.transfer.TransferSession
 import io.ktor.server.application.Application
 import io.ktor.server.application.install
 import io.ktor.server.engine.EmbeddedServer
+import io.ktor.server.engine.connector
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.netty.NettyApplicationEngine
@@ -35,6 +36,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.time.Duration.Companion.seconds
 
 private val HELLO_TIMEOUT = 10.seconds
+
+/** Longer than the ping timeout below, so pings (not this) decide when a phone is gone. */
+const val RESPONSE_WRITE_TIMEOUT_SECONDS = 60
 
 /** What the server does with a phone once the handshake succeeded. */
 class ServerHooks(
@@ -59,7 +63,19 @@ class HelloServer(
     fun start() {
         // Never fall back: a TLS config must not turn into a plaintext server.
         check(transport is TransportConfig.Plaintext) { "TLS is not implemented yet" }
-        server = embeddedServer(Netty, port = port, host = "0.0.0.0") {
+        server = embeddedServer(
+            Netty,
+            configure = {
+                connector {
+                    this.port = this@HelloServer.port
+                    host = "0.0.0.0"
+                }
+                // Netty's default is 10 s: any write still waiting after 10 s kills the connection,
+                // which happens whenever the phone falls 10 s behind (e.g. busy storage). Dead
+                // phones are detected by the WebSocket ping timeout instead (see linkDropModule).
+                responseWriteTimeoutSeconds = RESPONSE_WRITE_TIMEOUT_SECONDS
+            },
+        ) {
             linkDropModule(local, hooks, log)
         }.start(wait = false)
     }
@@ -68,11 +84,15 @@ class HelloServer(
         server?.stop(gracePeriodMillis = 500, timeoutMillis = 2_000)
         server = null
     }
+
+    /** The port actually listened on (differs from [port] when that is 0, as in tests). */
+    suspend fun boundPort(): Int = checkNotNull(server) { "not started" }.engine.resolvedConnectors().first().port
 }
 
 /** Installs WebSockets and the session route. Separate from [HelloServer] so tests can use it. */
 fun Application.linkDropModule(local: LocalDevice, hooks: ServerHooks = ServerHooks(), log: (String) -> Unit) {
     install(WebSockets) {
+        // A ping every 15 s; the phone must answer within 30 s or the connection is closed.
         pingPeriod = 15.seconds
         timeout = 30.seconds
         maxFrameSize = MAX_FRAME_BYTES.toLong()
@@ -109,11 +129,12 @@ private suspend fun DefaultWebSocketServerSession.handleSession(
     )
     val connection = PeerConnection(hello.deviceName, peer, session, transferEnabled)
     hooks.onConnected(connection)
+    var reason: String? = null
     try {
-        session.run()
+        reason = session.run()
     } finally {
         hooks.onDisconnected(connection)
-        log("Disconnected: \"${hello.deviceName}\" ($peer)")
+        log("Disconnected: \"${hello.deviceName}\" ($peer)" + (reason?.let { ": $it" } ?: ""))
     }
 }
 

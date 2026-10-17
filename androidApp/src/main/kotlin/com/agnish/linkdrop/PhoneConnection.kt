@@ -99,13 +99,17 @@ class PhoneConnection(
             decider = decider,
         )
         _state.value = State.Connected(address, ack.deviceName, session, transferEnabled)
+        var reason: String? = null
         try {
-            session.run()
+            reason = session.run()
         } finally {
             opened.channel.close(1000, "bye")
             channel = null
             _history.update { it + session.transfers.value }
-            _state.value = State.Disconnected(if (userDisconnected) null else "connection lost")
+            // Show the real cause (e.g. a ping timeout), not just "connection lost".
+            _state.value = State.Disconnected(
+                if (userDisconnected) null else "connection lost" + (reason?.let { ": $it" } ?: ""),
+            )
         }
     }
 

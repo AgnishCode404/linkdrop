@@ -8,6 +8,9 @@ sealed interface WireFrame {
     class Binary(val bytes: ByteArray) : WireFrame
 }
 
+/** The connection was closed with a non-normal close code; [message] says by whom and why. */
+class ConnectionClosedException(message: String) : Exception(message)
+
 /** One WebSocket connection, as the protocol and transfer code see it. */
 interface FrameChannel {
     /**

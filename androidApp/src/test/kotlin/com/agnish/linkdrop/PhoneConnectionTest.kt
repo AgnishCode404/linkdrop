@@ -158,10 +158,9 @@ class PhoneConnectionTest {
         connection.awaitState { it is PhoneConnection.State.Connected }
 
         server?.stop(0, 1_000)
-        assertEquals(
-            PhoneConnection.State.Disconnected("connection lost"),
-            connection.awaitState { it is PhoneConnection.State.Disconnected },
-        )
+        val state = connection.awaitState { it is PhoneConnection.State.Disconnected } as PhoneConnection.State.Disconnected
+        // "connection lost", plus the cause when the socket ended abnormally.
+        assertTrue(state.reason?.startsWith("connection lost") == true, "$state")
     }
 
     @Test

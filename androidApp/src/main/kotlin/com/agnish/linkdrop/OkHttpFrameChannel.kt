@@ -1,5 +1,6 @@
 package com.agnish.linkdrop
 
+import com.agnish.linkdrop.protocol.ConnectionClosedException
 import com.agnish.linkdrop.protocol.FrameChannel
 import com.agnish.linkdrop.protocol.WireFrame
 import kotlinx.coroutines.CancellationException
@@ -51,7 +52,9 @@ class OkHttpFrameChannel private constructor(private val maxFrameBytes: Int) : F
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
             webSocket.close(code, null)
-            finish(null)
+            // Keep the desktop's reason (e.g. "1011 Ping timeout") so the user can see why.
+            val normal = code == CLOSE_NORMAL || code == CLOSE_GOING_AWAY
+            finish(if (normal) null else ConnectionClosedException("closed by the desktop: $code $reason".trim()))
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
@@ -107,6 +110,8 @@ class OkHttpFrameChannel private constructor(private val maxFrameBytes: Int) : F
         private const val SEND_POLL_MILLIS = 5L
         private const val INCOMING_BUFFER_FRAMES = 16
         private const val CLOSE_TOO_BIG = 1009
+        private const val CLOSE_NORMAL = 1000
+        private const val CLOSE_GOING_AWAY = 1001
 
         /** Opens a WebSocket to [url] (`ws://` or `wss://`). Throws if the connection fails. */
         suspend fun connect(client: OkHttpClient, url: String, maxFrameBytes: Int): OkHttpFrameChannel {

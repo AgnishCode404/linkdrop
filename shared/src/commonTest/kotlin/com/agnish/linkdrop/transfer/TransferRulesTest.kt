@@ -14,6 +14,7 @@ import com.agnish.linkdrop.protocol.TransferOffer
 import com.agnish.linkdrop.protocol.TransferResponse
 import com.agnish.linkdrop.protocol.WireFrame
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlin.coroutines.EmptyCoroutineContext
@@ -237,6 +238,36 @@ class TransferRulesTest {
         s.peer.sendBinary(Chunk.encode(0, byteArrayOf(1)))
         assertEquals(ErrorCodes.BAD_REQUEST, assertIs<ErrorMessage>(s.peer.receiveMessage()).code)
         assertNull(s.peer.receiveFrame()) // connection closed
+    }
+
+    private fun session(channel: MemoryChannel, transferEnabled: Boolean = true) = TransferSession(
+        channel, "Peer", transferEnabled,
+        sendChunkBytes = 1024, receiveChunkBytes = 1024, sink = MemorySink(),
+        decider = RecordingDecider.acceptAll(), context = EmptyCoroutineContext,
+    )
+
+    @Test
+    fun normalCloseEndsRunWithoutAReason() = runTest {
+        val (mine, theirs) = MemoryChannel.pair()
+        val reason = async { session(mine).run() }
+        theirs.close()
+        assertNull(reason.await())
+    }
+
+    @Test
+    fun networkErrorEndsRunWithItsMessage() = runTest {
+        val (mine, _) = MemoryChannel.pair()
+        val reason = async { session(mine).run() }
+        mine.fail(RuntimeException("sent ping but didn't receive pong within 30000ms"))
+        assertEquals("sent ping but didn't receive pong within 30000ms", reason.await())
+    }
+
+    @Test
+    fun closingBecauseOfBrokenFramesEndsRunWithTheRule() = runTest {
+        val (mine, theirs) = MemoryChannel.pair()
+        val reason = async { session(mine, transferEnabled = false).run() }
+        theirs.sendBinary(byteArrayOf(0, 0, 0, 0, 1))
+        assertEquals("closed: file data without the transfer feature", reason.await())
     }
 
     @Test

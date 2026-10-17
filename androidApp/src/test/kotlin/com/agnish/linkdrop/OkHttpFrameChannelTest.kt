@@ -21,6 +21,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 /**
  * Runs [OkHttpFrameChannel] over real sockets against a local Ktor server that reads or writes
@@ -143,6 +144,25 @@ class OkHttpFrameChannelTest {
         val channel = OkHttpFrameChannel.connect(HelloClient.okHttp, url, maxFrameBytes = 1024)
         val error = assertFailsWith<FrameTooLargeException> { channel.incoming.receive() }
         assertEquals(2048L, error.size)
+    }
+
+    @Test
+    fun abnormalCloseByTheDesktopKeepsItsReason() = withServer(
+        handler = { close(CloseReason(CloseReason.Codes.INTERNAL_ERROR, "Ping timeout")) },
+    ) { url ->
+        val channel = OkHttpFrameChannel.connect(HelloClient.okHttp, url, maxFrameBytes = 1024)
+        val error = assertFailsWith<com.agnish.linkdrop.protocol.ConnectionClosedException> { channel.incoming.receive() }
+        assertEquals("closed by the desktop: 1011 Ping timeout", error.message)
+    }
+
+    @Test
+    fun normalCloseIsNotAnError() = withServer(
+        handler = { close(CloseReason(CloseReason.Codes.NORMAL, "bye")) },
+    ) { url ->
+        val channel = OkHttpFrameChannel.connect(HelloClient.okHttp, url, maxFrameBytes = 1024)
+        val result = channel.incoming.receiveCatching()
+        assertTrue(result.isClosed)
+        assertEquals(null, result.exceptionOrNull())
     }
 
     @Test

@@ -112,31 +112,35 @@ class TransferSession(
         cancelRequests.trySend(transferId)
     }
 
-    /** Handles the connection until it ends. Anything unfinished then fails with "connection lost". */
-    suspend fun run() {
-        withContext(context) {
-            try {
-                coroutineScope {
-                    val workers = listOf(
-                        launch { senderLoop() },
-                        launch { offerLoop() },
-                        launch { commandLoop() },
-                    )
-                    readerLoop()
-                    workers.forEach { it.cancel() }
-                }
-            } finally {
-                withContext(NonCancellable) { endAll() }
+    /**
+     * Handles the connection until it ends. Anything unfinished then fails with "connection lost".
+     * Returns why the connection ended (for the user and the log), or null for a normal close.
+     */
+    suspend fun run(): String? = withContext(context) {
+        try {
+            coroutineScope {
+                val workers = listOf(
+                    launch { senderLoop() },
+                    launch { offerLoop() },
+                    launch { commandLoop() },
+                )
+                val reason = readerLoop()
+                workers.forEach { it.cancel() }
+                reason
             }
+        } finally {
+            withContext(NonCancellable) { endAll() }
         }
     }
 
     // ---- Reader: every incoming frame ----
 
-    private suspend fun readerLoop() {
+    /** Returns why the connection ended, or null for a normal close. */
+    private suspend fun readerLoop(): String? {
         var malformed = 0
         while (true) {
-            val frame = channel.incoming.receiveCatching().getOrNull() ?: break
+            val result = channel.incoming.receiveCatching()
+            val frame = result.getOrNull() ?: return result.exceptionOrNull()?.let { describeEnd(it) }
             when (frame) {
                 is WireFrame.Text -> when (val decoded = ProtocolCodec.decode(frame.text)) {
                     is Decoded.Ok -> onMessage(decoded.id, decoded.message)
@@ -144,7 +148,7 @@ class TransferSession(
                         sendMessage(ErrorMessage(ErrorCodes.UNSUPPORTED_TYPE, decoded.type, decoded.id))
                     is Decoded.UnsupportedVersion -> {
                         reject(ErrorMessage(ErrorCodes.VERSION_MISMATCH, ref = decoded.id))
-                        break
+                        return "closed: the other device uses protocol version ${decoded.version}"
                     }
                     is Decoded.Malformed -> {
                         val error = ErrorMessage(ErrorCodes.MALFORMED, decoded.reason)
@@ -153,14 +157,14 @@ class TransferSession(
                         } else {
                             log("Closing: too many malformed frames from \"$peerName\"")
                             reject(error)
-                            break
+                            return "closed: too many malformed frames"
                         }
                     }
                 }
                 is WireFrame.Binary -> {
                     if (!transferEnabled) {
                         reject(ErrorMessage(ErrorCodes.BAD_REQUEST, "binary frame without transfer"))
-                        break
+                        return "closed: file data without the transfer feature"
                     }
                     onChunk(frame.bytes)
                 }
@@ -669,6 +673,8 @@ class TransferSession(
     }
 
     private fun describe(e: Exception): String = e.message ?: e::class.simpleName ?: "error"
+
+    private fun describeEnd(e: Throwable): String = e.message ?: e::class.simpleName ?: "error"
 
     companion object {
         /** The session is closed on this many malformed frames (PROTOCOL.md, compatibility rule 4). */

@@ -43,6 +43,14 @@ class MemoryChannel : FrameChannel {
         peer.inbox.close()
     }
 
+    /** Ends the connection abnormally, as a network error would: this end sees [cause]. */
+    fun fail(cause: Throwable) {
+        closed = true
+        peer.closed = true
+        inbox.close(cause)
+        peer.inbox.close()
+    }
+
     // Helpers for tests that play the peer by hand.
 
     suspend fun send(message: Message, id: String = ProtocolCodec.newMessageId()) = sendText(ProtocolCodec.encode(message, id))
