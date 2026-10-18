@@ -6,6 +6,32 @@ transfer (Slice B) adds code but no protocol changes.
 
 Code: `shared/src/commonMain/kotlin/com/agnish/linkdrop/protocol/`.
 
+## Discovery
+
+The desktop announces itself on the local network with mDNS / DNS-SD, so the phone can list
+it instead of the user typing an address. Discovery only finds an address; connecting is
+unchanged (see Transport and Handshake). Code: `protocol/Discovery.kt`.
+
+- Service type `_linkdrop._tcp` (in mDNS: `_linkdrop._tcp.local.`), on the WebSocket port.
+- Instance name: the desktop's name (e.g. `Arch`). mDNS may add ` (2)` on name conflicts.
+- TXT record:
+
+  | Key  | Value |
+  |------|-------|
+  | `v`  | `PROTOCOL_VERSION` (`1`) |
+  | `id` | The desktop's device id (the same as `deviceId` in `helloAck`), 1–64 characters. |
+
+Announcements are not authenticated: anyone on the network can announce anything. A phone
+ignores an announcement whose `v` is not its own version, whose `id` is missing or invalid,
+whose port is invalid, or whose address is not a private-network IPv4 address (`10/8`,
+`172.16/12`, `192.168/16`, `169.254/16`), so a fake announcement cannot point it at the
+internet. The name is cleaned like a device name before it is shown. Until pairing exists,
+the user decides whom to trust by name; pairing will bind `id` to a certificate.
+
+A desktop announced several times (several network interfaces, or again after an IP change)
+is listed once, by `id`. A phone that remembers a desktop by `id` finds it again after its IP
+address changes.
+
 ## Transport
 
 - One WebSocket connection per session, at path `/v1/session`, default port `47800`.
