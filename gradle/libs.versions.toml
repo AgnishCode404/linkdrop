@@ -12,6 +12,8 @@ kotlinx-serialization = "1.11.0"
 # Ktor 3.6.0 is built against kotlinx-coroutines 1.11.0 and kotlinx-serialization 1.11.0.
 ktor = "3.6.0"
 okhttp = "5.5.0"
+# mDNS announcements from the desktop. 3.6.3 rather than 3.6.4: 3.6.4 was only days old when chosen.
+jmdns = "3.6.3"
 # Matches the slf4j-api version Ktor 3.6.0 depends on.
 slf4j = "2.0.19"
 # Pre-release on purpose: JetBrains' material3 is versioned separately from Compose
@@ -44,6 +46,7 @@ ktor-clientWebsockets = { module = "io.ktor:ktor-client-websockets", version.ref
 # buffer limit and silently drops data. OkHttp also gives mature TLS and certificate pinning later.
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
+jmdns = { module = "org.jmdns:jmdns", version.ref = "jmdns" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }

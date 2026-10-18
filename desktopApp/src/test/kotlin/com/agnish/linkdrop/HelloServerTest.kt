@@ -20,6 +20,9 @@ import io.ktor.server.testing.testApplication
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
 import java.util.Collections
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.time.Duration.Companion.seconds
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -65,7 +68,11 @@ class HelloServerTest {
     fun helloGetsAckWithServerIdentity() = serverTest {
         sendText(hello())
         assertEquals(desktop.helloAck(), receiveMessage())
-        assertTrue(logLines.any { "Hello from \"Pixel\"" in it }, "log: $logLines")
+        // The server logs right after sending the ack, so the line can appear a moment later.
+        val logged = withTimeoutOrNull(5.seconds) {
+            while (logLines.none { "Hello from \"Pixel\"" in it }) delay(10)
+        }
+        assertTrue(logged != null, "log: $logLines")
     }
 
     @Test

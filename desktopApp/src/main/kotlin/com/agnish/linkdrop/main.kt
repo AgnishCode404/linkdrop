@@ -33,6 +33,7 @@ import com.agnish.linkdrop.protocol.DEFAULT_PORT
 import com.agnish.linkdrop.protocol.LocalDevice
 import com.agnish.linkdrop.protocol.TransferLimits
 import com.agnish.linkdrop.protocol.TransportConfig
+import kotlinx.coroutines.flow.StateFlow
 import java.awt.FileDialog
 import java.awt.Frame
 import java.nio.file.Files
@@ -58,9 +59,16 @@ fun main() {
     if (server != null && startError == null) log.add("Server started on port $DEFAULT_PORT")
     val addresses = DesktopDevice.lanAddresses()
 
+    // Announce on the network only when the server really runs; mDNS takes a few seconds.
+    val announcer = DesktopAnnouncer(local, DEFAULT_PORT, log::add)
+    if (server != null && startError == null) {
+        Thread({ announcer.start(addresses) }, "mdns-announce").apply { isDaemon = true }.start()
+    }
+
     application {
         Window(
             onCloseRequest = {
+                announcer.stop()
                 server?.stop()
                 exitApplication()
             },
@@ -72,7 +80,7 @@ fun main() {
             LaunchedEffect(offers.size) { if (offers.isNotEmpty()) window.toFront() }
 
             DesktopScreen(
-                local, addresses, transport, startError, receiveDir, state, log,
+                local, addresses, transport, startError, receiveDir, state, log, announcer.status,
                 onSendFiles = { connection -> sendPickedFiles(window, connection, log) },
                 onOpenFolder = { openFolder(receiveDir, log) },
             )
@@ -110,9 +118,11 @@ fun DesktopScreen(
     receiveDir: Path,
     state: DesktopState,
     log: EventLog,
+    announcement: StateFlow<DesktopAnnouncer.Status>,
     onSendFiles: (PeerConnection) -> Unit,
     onOpenFolder: () -> Unit,
 ) {
+    val visibility by announcement.collectAsState()
     val connections by state.connections.collectAsState()
     val offers by state.offers.collectAsState()
     val history by state.history.collectAsState()
@@ -140,7 +150,18 @@ fun DesktopScreen(
                                 color = MaterialTheme.colorScheme.error,
                             )
                             else -> {
-                                Text("Enter this address on the phone:")
+                                when (val v = visibility) {
+                                    is DesktopAnnouncer.Status.Visible -> Text(
+                                        "Phones on this Wi-Fi list this desktop as \"${v.name}\".",
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                    DesktopAnnouncer.Status.Starting -> Text("Announcing this desktop on the network…")
+                                    is DesktopAnnouncer.Status.NotVisible -> Text(
+                                        "Phones cannot find this desktop automatically (${v.reason}).",
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                }
+                                Text("Or enter this address on the phone:")
                                 addresses.forEach {
                                     Text("$it:$DEFAULT_PORT", style = MaterialTheme.typography.titleLarge)
                                 }

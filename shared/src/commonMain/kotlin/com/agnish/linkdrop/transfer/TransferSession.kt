@@ -187,7 +187,6 @@ class TransferSession(
                     is FileBegin -> onFileBegin(message)
                     is FileEnd -> onFileEnd(message)
                     is TransferDone -> onTransferDone(message)
-                    else -> Unit
                 }
             }
         }
