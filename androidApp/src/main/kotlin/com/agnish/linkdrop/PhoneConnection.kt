@@ -39,6 +39,8 @@ class PhoneConnection(
         data class Connecting(val address: ServerAddress) : State
         data class Connected(
             val address: ServerAddress,
+            /** The desktop's device id, from its `helloAck` (used to recognise it in discovery). */
+            val peerId: String,
             val peerName: String,
             val session: TransferSession,
             /** False if the desktop app is too old for file transfer. */
@@ -98,7 +100,7 @@ class PhoneConnection(
             sink = sink,
             decider = decider,
         )
-        _state.value = State.Connected(address, ack.deviceName, session, transferEnabled)
+        _state.value = State.Connected(address, ack.deviceId, ack.deviceName, session, transferEnabled)
         var reason: String? = null
         try {
             reason = session.run()

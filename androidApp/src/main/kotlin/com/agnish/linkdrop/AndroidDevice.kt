@@ -12,6 +12,7 @@ object AndroidDevice {
     private const val PREFS = "linkdrop"
     private const val KEY_DEVICE_ID = "deviceId"
     private const val KEY_LAST_ADDRESS = "lastAddress"
+    private const val KEY_LAST_DESKTOP_ID = "lastDesktopId"
 
     /** This phone's identity. The ID is random, created on first run and then kept. */
     fun load(context: Context): LocalDevice = LocalDevice(
@@ -22,8 +23,12 @@ object AndroidDevice {
 
     fun lastAddress(context: Context): String = prefs(context).getString(KEY_LAST_ADDRESS, "") ?: ""
 
-    fun saveLastAddress(context: Context, address: String) {
-        prefs(context).edit().putString(KEY_LAST_ADDRESS, address).apply()
+    /** The desktop's device id, to mark it "last used" in the list of discovered desktops. */
+    fun lastDesktopId(context: Context): String? = prefs(context).getString(KEY_LAST_DESKTOP_ID, null)
+
+    /** Remembers the desktop just connected to: its address (for sharing) and its id. */
+    fun saveLastDesktop(context: Context, address: String, desktopId: String) {
+        prefs(context).edit().putString(KEY_LAST_ADDRESS, address).putString(KEY_LAST_DESKTOP_ID, desktopId).apply()
     }
 
     private fun loadOrCreateDeviceId(context: Context): String {
