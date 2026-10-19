@@ -33,7 +33,7 @@ class DesktopFinder(context: Context) {
     /** Android 14+: one callback per service; it also reports address changes. */
     private val infoCallbacks = mutableMapOf<String, NsdManager.ServiceInfoCallback>()
 
-    /** Android 10-13: the old API resolves one service at a time, so the rest wait here. */
+    /** Android 12-13: the old API resolves one service at a time, so the rest wait here. */
     private val resolveQueue = ArrayDeque<NsdServiceInfo>()
     private var resolving = false
 

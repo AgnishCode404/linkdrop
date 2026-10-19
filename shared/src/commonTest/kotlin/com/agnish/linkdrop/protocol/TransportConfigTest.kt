@@ -2,7 +2,6 @@ package com.agnish.linkdrop.protocol
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 
 class TransportConfigTest {
 
@@ -18,8 +17,8 @@ class TransportConfigTest {
     }
 
     @Test
-    fun noTransportWithoutPlaintextOrPin() {
-        assertNull(TransportConfig.choose(allowPlaintext = false, pinnedCertSha256 = null))
+    fun withoutPlaintextItIsAlwaysTlsUnpinnedUntilPaired() {
+        assertEquals(TransportConfig.Tls(null), TransportConfig.choose(allowPlaintext = false, pinnedCertSha256 = null))
     }
 
     @Test

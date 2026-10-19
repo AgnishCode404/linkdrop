@@ -63,12 +63,12 @@ fun main() {
     // TLS whenever plaintext is not explicitly allowed; never a fallback from one to the other.
     val transport = when {
         BuildFlags.ALLOW_PLAINTEXT -> TransportConfig.Plaintext
-        identity != null -> TransportConfig.Tls(identity.fingerprint)
+        identity != null -> TransportConfig.Tls()
         else -> null
     }
     val server = transport?.let { HelloServer(local, DEFAULT_PORT, it, hooks, identity, log::add) }
     val startError = if (server == null) {
-        "Cannot start: ${identityResult.exceptionOrNull()?.message ?: TransportConfig.NO_TRANSPORT_MESSAGE}"
+        "Cannot start: ${identityResult.exceptionOrNull()?.message}"
     } else {
         runCatching { server.start() }.exceptionOrNull()
             ?.let { "Server failed to start on port $DEFAULT_PORT: ${it.message}" }

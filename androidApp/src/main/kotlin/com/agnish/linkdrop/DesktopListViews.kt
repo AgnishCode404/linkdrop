@@ -22,6 +22,8 @@ import com.agnish.linkdrop.protocol.DiscoveredDesktop
 fun DesktopList(
     desktops: List<DiscoveredDesktop>,
     lastDesktopId: String?,
+    /** Device ids of paired desktops: these are verified by certificate when connecting. */
+    pairedIds: Set<String>,
     problem: String?,
     enabled: Boolean,
     onPick: (DiscoveredDesktop) -> Unit,
@@ -48,12 +50,16 @@ fun DesktopList(
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f),
                             )
-                            if (desktop.deviceId == lastDesktopId) {
-                                Text("last used", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            val tags = listOfNotNull(
+                                "paired".takeIf { desktop.deviceId in pairedIds },
+                                "last used".takeIf { desktop.deviceId == lastDesktopId },
+                            )
+                            if (tags.isNotEmpty()) {
+                                Text(tags.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                             }
                         }
-                        // The address is shown so the user can spot an unexpected one (announcements
-                        // are not authenticated until pairing exists).
+                        // The address is shown so the user can spot an unexpected one: announcements
+                        // are not authenticated; only pairing (the certificate) proves who a desktop is.
                         Text("${desktop.address.host}:${desktop.address.port}", style = MaterialTheme.typography.bodySmall)
                     }
                 }

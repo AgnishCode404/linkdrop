@@ -50,9 +50,11 @@ import androidx.lifecycle.Lifecycle
 import com.agnish.linkdrop.protocol.LocalDevice
 import com.agnish.linkdrop.protocol.ServerAddress
 import com.agnish.linkdrop.protocol.TransferLimits
-import com.agnish.linkdrop.protocol.TransportConfig
 import com.agnish.linkdrop.transfer.TransferProgress
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.launch
 
 /**
@@ -85,8 +87,6 @@ class MainActivity : ComponentActivity() {
         val connection = (application as LinkDropApplication).connection
         val local = AndroidDevice.load(this)
         val lastAddress = AndroidDevice.lastAddress(this)
-        // ALLOW_PLAINTEXT is false in every release build (see androidApp/build.gradle.kts).
-        val transport = TransportConfig.choose(BuildConfig.ALLOW_PLAINTEXT, pinnedCertSha256 = null)
         // Non-null when opened from another app's share menu.
         val share = ShareRequest.from(intent)
 
@@ -97,7 +97,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             PhoneScreen(
-                local, lastAddress, transport, connection, finder, AndroidDevice.lastDesktopId(this),
+                local, lastAddress, BuildConfig.ALLOW_PLAINTEXT, connection, finder, AndroidDevice.lastDesktopId(this),
                 share, onShareDone = { finish() },
             )
         }
@@ -119,7 +119,8 @@ class MainActivity : ComponentActivity() {
 fun PhoneScreen(
     local: LocalDevice,
     lastAddress: String,
-    transport: TransportConfig?,
+    /** Development builds only: connections are not encrypted (BuildConfig.ALLOW_PLAINTEXT). */
+    plaintext: Boolean,
     connection: PhoneConnection,
     finder: DesktopFinder,
     lastDesktopId: String?,
@@ -141,6 +142,8 @@ fun PhoneScreen(
 
     val desktops by finder.desktops.collectAsState()
     val finderProblem by finder.problem.collectAsState()
+    val noPairs = remember { MutableStateFlow(emptyList<com.agnish.linkdrop.protocol.PairedDevice>()) }
+    val pairedDesktops by (connection.paired?.devices ?: noPairs).collectAsState()
     var manualAddress by rememberSaveable { mutableStateOf(false) }
 
     // Remember the desktop once connected: its address (sharing connects there) and its id.
@@ -152,24 +155,20 @@ fun PhoneScreen(
     }
     KeepScreenOnWhile(transfers.any { !it.finished })
 
-    fun connect(target: ServerAddress) {
-        val secured = transport ?: return
-        connection.connect(target, secured)
-    }
-
     // If the user denies the permission we still try: on phones that don't enforce it, it works.
-    var pendingTarget by remember { mutableStateOf<ServerAddress?>(null) }
+    // desktopId: the desktop the user picked, if known; a paired one is then pinned.
+    var pendingTarget by remember { mutableStateOf<Pair<ServerAddress, String?>?>(null) }
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        pendingTarget?.let(::connect)
+        pendingTarget?.let { (target, desktopId) -> connection.connect(target, desktopId) }
     }
 
-    fun requestConnect(target: ServerAddress?) {
+    fun requestConnect(target: ServerAddress?, desktopId: String? = null) {
         if (target == null) return
         if (needsLocalNetworkPermission(context)) {
-            pendingTarget = target
+            pendingTarget = target to desktopId
             permissionLauncher.launch(ACCESS_LOCAL_NETWORK)
         } else {
-            connect(target)
+            connection.connect(target, desktopId)
         }
     }
 
@@ -190,18 +189,25 @@ fun PhoneScreen(
         if (share !is ShareRequest.Files || shareTransferIds.isNotEmpty()) return@LaunchedEffect
         val sources = shareSources ?: return@LaunchedEffect
         when (val s = state) {
-            // Only the last address actually used, never a discovered one: an announcement is not
-            // authenticated, and following a desktop id to a new address would let anyone on the
-            // Wi-Fi who copies that id receive shared files without a tap (until pairing exists).
-            is PhoneConnection.State.Disconnected -> if (!shareConnectTried && address != null && transport != null) {
+            is PhoneConnection.State.Disconnected -> if (!shareConnectTried) {
                 shareConnectTried = true
-                requestConnect(address)
+                // A paired desktop is proven by its pinned certificate, so it may be followed to a
+                // new address found by discovery. Otherwise only the last address actually used: an
+                // announcement alone proves nothing, and anyone could copy a desktop's id.
+                val pairedLast = lastDesktopId?.takeIf { connection.paired?.byDeviceId(it) != null }
+                val found = pairedLast?.let { id ->
+                    withTimeoutOrNull(3.seconds) { finder.desktops.first { list -> list.any { it.deviceId == id } } }
+                        ?.firstOrNull { it.deviceId == id }
+                }
+                requestConnect(found?.address ?: address, pairedLast)
             }
             is PhoneConnection.State.Connected -> if (s.transferEnabled && sources.isNotEmpty()) {
                 val ids = sources.chunked(TransferLimits.MAX_FILES_PER_OFFER).map { s.session.send(it) }
                 shareTransferIds = ArrayList(ids)
             }
-            is PhoneConnection.State.Connecting -> Unit
+            is PhoneConnection.State.Connecting,
+            is PhoneConnection.State.ConfirmPairing,
+            is PhoneConnection.State.WaitingForDesktop -> Unit
         }
     }
 
@@ -226,13 +232,8 @@ fun PhoneScreen(
             ) {
                 Text("LinkDrop", style = MaterialTheme.typography.headlineSmall)
                 Text("This device: ${local.deviceName}")
-                when (transport) {
-                    null -> Text(TransportConfig.NO_TRANSPORT_MESSAGE, color = MaterialTheme.colorScheme.error)
-                    TransportConfig.Plaintext -> Text(
-                        "Development build: connections are NOT encrypted.",
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                    is TransportConfig.Tls -> Unit
+                if (plaintext) {
+                    Text("Development build: connections are NOT encrypted.", color = MaterialTheme.colorScheme.error)
                 }
 
                 when (val s = state) {
@@ -241,11 +242,12 @@ fun PhoneScreen(
                         DesktopList(
                             desktops = desktops,
                             lastDesktopId = lastDesktopId,
+                            pairedIds = pairedDesktops.map { it.deviceId }.toSet(),
                             problem = finderProblem,
-                            enabled = transport != null,
+                            enabled = true,
                             onPick = { desktop ->
                                 addressText = "${desktop.address.host}:${desktop.address.port}"
-                                requestConnect(desktop.address)
+                                requestConnect(desktop.address, desktop.deviceId)
                             },
                         )
                         TextButton(onClick = { manualAddress = !manualAddress }) {
@@ -263,11 +265,14 @@ fun PhoneScreen(
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                                 modifier = Modifier.fillMaxWidth(),
                             )
-                            Button(onClick = { requestConnect(address) }, enabled = transport != null && address != null) {
+                            Button(onClick = { requestConnect(address) }, enabled = address != null) {
                                 Text("Connect")
                             }
                         }
+                        connection.paired?.let { PairedDesktopsList(it) }
                     }
+                    is PhoneConnection.State.ConfirmPairing -> PairingCodeCard(s)
+                    is PhoneConnection.State.WaitingForDesktop -> WaitingForDesktopCard(s, onCancel = { connection.disconnect() })
                     is PhoneConnection.State.Connecting -> {
                         Text("Connecting to ${s.address.host}:${s.address.port}…")
                         OutlinedButton(onClick = { connection.disconnect() }) { Text("Cancel") }
@@ -275,7 +280,7 @@ fun PhoneScreen(
                     is PhoneConnection.State.Connected -> {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                "Connected to \"${s.peerName}\"",
+                                "Connected to \"${s.peerName}\"" + if (s.secure) " (encrypted, paired)" else "",
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.weight(1f),
                             )
@@ -310,7 +315,9 @@ fun PhoneScreen(
                         sources.isEmpty() -> ShareProgress.CannotSend("None of the shared files could be read.")
                         connected != null && !connected.transferEnabled ->
                             ShareProgress.CannotSend("The desktop's LinkDrop app is too old to transfer files.")
-                        state is PhoneConnection.State.Connecting -> ShareProgress.Connecting
+                        state is PhoneConnection.State.Connecting ||
+                            state is PhoneConnection.State.ConfirmPairing ||
+                            state is PhoneConnection.State.WaitingForDesktop -> ShareProgress.Connecting
                         else -> ShareProgress.NeedsAddress
                     }
                     ShareCard(

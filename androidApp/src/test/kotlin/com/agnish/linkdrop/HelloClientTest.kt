@@ -127,7 +127,8 @@ class HelloClientTest {
         val result = runBlocking {
             connectOnce(ServerAddress("127.0.0.1", freePort), phone, TransportConfig.Tls("ab12"))
         }
-        assertEquals(HelloResult.Failed("TLS is not implemented yet"), result)
+        // Without TLS settings the client refuses; it never falls back to plaintext.
+        assertEquals(HelloResult.Failed("this build cannot make secure connections"), result)
     }
 
     @Test

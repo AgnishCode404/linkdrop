@@ -16,6 +16,11 @@ class LinkDropApplication : Application() {
             local = AndroidDevice.load(this),
             sink = MediaStoreSink(this),
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            // ALLOW_PLAINTEXT is false in every release build (see androidApp/build.gradle.kts).
+            allowPlaintext = BuildConfig.ALLOW_PLAINTEXT,
+            // The Keystore identity is created on first use (in the background, when connecting).
+            tls = PhoneTls(identity = { PhoneIdentity.loadOrCreate() }, exporter = AndroidKeyingMaterialExporter),
+            paired = PairedDesktops.fromPreferences(this),
         )
     }
 }

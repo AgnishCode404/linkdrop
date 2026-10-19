@@ -8,8 +8,13 @@ sealed interface TransportConfig {
     /** `ws://`, unencrypted. Development builds only; never chosen when TLS is possible. */
     data object Plaintext : TransportConfig
 
-    /** `wss://` with the peer's certificate pinned during pairing (Slice D, not implemented yet). */
-    data class Tls(val pinnedCertSha256: String) : TransportConfig
+    /**
+     * `wss://` with mutual TLS (PROTOCOL.md, "Security and pairing"). On the phone,
+     * [pinnedCertSha256] is the paired desktop's certificate fingerprint; any other certificate is
+     * refused. Null means not pinned: a desktop not paired yet is accepted only after both users
+     * confirmed the pairing code. The desktop server does not use the field.
+     */
+    data class Tls(val pinnedCertSha256: String? = null) : TransportConfig
 
     val scheme: String
         get() = when (this) {
@@ -19,18 +24,13 @@ sealed interface TransportConfig {
 
     companion object {
         /**
-         * Picks the transport for this build. A pinned certificate always means TLS, with no
-         * fallback to plaintext. Returns null when the build allows no transport (a release
-         * build before pairing exists).
+         * Picks the transport. A pinned certificate always means TLS, with no fallback to
+         * plaintext; plaintext only when this build explicitly allows it; otherwise TLS.
          */
-        fun choose(allowPlaintext: Boolean, pinnedCertSha256: String?): TransportConfig? = when {
+        fun choose(allowPlaintext: Boolean, pinnedCertSha256: String?): TransportConfig = when {
             pinnedCertSha256 != null -> Tls(pinnedCertSha256)
             allowPlaintext -> Plaintext
-            else -> null
+            else -> Tls(null)
         }
-
-        /** Shown to the user when [choose] returns null. */
-        const val NO_TRANSPORT_MESSAGE =
-            "This build has plaintext disabled and secure connections (TLS) are not implemented yet."
     }
 }

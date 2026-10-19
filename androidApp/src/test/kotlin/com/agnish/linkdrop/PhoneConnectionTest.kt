@@ -9,7 +9,6 @@ import com.agnish.linkdrop.protocol.LocalDevice
 import com.agnish.linkdrop.protocol.ProtocolCodec
 import com.agnish.linkdrop.protocol.SESSION_PATH
 import com.agnish.linkdrop.protocol.ServerAddress
-import com.agnish.linkdrop.protocol.TransportConfig
 import com.agnish.linkdrop.protocol.WireFrame
 import com.agnish.linkdrop.transfer.FileReader
 import com.agnish.linkdrop.transfer.FileSink
@@ -100,7 +99,7 @@ class PhoneConnectionTest {
         return runBlocking { started.engine.resolvedConnectors().first().port }
     }
 
-    private fun connection() = PhoneConnection(phone, phoneSink, scope).also { connection ->
+    private fun connection() = PhoneConnection(phone, phoneSink, scope, allowPlaintext = true, tls = null, paired = null).also { connection ->
         // Accept offers the way a user tapping "Accept" would.
         scope.launch { connection.offers.collect { offers -> offers.forEach { it.answer.complete(true) } } }
     }
@@ -116,7 +115,7 @@ class PhoneConnectionTest {
     fun connectsAndTransfersBothWays() = runBlocking {
         val port = startDesktop()
         val connection = connection()
-        connection.connect(ServerAddress("127.0.0.1", port), TransportConfig.Plaintext)
+        connection.connect(ServerAddress("127.0.0.1", port))
         val connected = assertIs<PhoneConnection.State.Connected>(
             connection.awaitState { it is PhoneConnection.State.Connected },
         )
@@ -140,7 +139,7 @@ class PhoneConnectionTest {
     fun disconnectingKeepsHistoryAndGivesNoError() = runBlocking {
         val port = startDesktop()
         val connection = connection()
-        connection.connect(ServerAddress("127.0.0.1", port), TransportConfig.Plaintext)
+        connection.connect(ServerAddress("127.0.0.1", port))
         val connected = connection.awaitState { it is PhoneConnection.State.Connected } as PhoneConnection.State.Connected
         val id = connected.session.send(listOf(BytesSource("a.txt", byteArrayOf(1, 2, 3))))
         connected.session.awaitFinished(id)
@@ -154,7 +153,7 @@ class PhoneConnectionTest {
     fun desktopGoingAwayIsReported() = runBlocking {
         val port = startDesktop()
         val connection = connection()
-        connection.connect(ServerAddress("127.0.0.1", port), TransportConfig.Plaintext)
+        connection.connect(ServerAddress("127.0.0.1", port))
         connection.awaitState { it is PhoneConnection.State.Connected }
 
         server?.stop(0, 1_000)
@@ -167,7 +166,7 @@ class PhoneConnectionTest {
     fun oldDesktopWithoutTransferIsConnectedButCannotTransfer() = runBlocking {
         val port = startDesktop(features = emptyList())
         val connection = connection()
-        connection.connect(ServerAddress("127.0.0.1", port), TransportConfig.Plaintext)
+        connection.connect(ServerAddress("127.0.0.1", port))
         val connected = connection.awaitState { it is PhoneConnection.State.Connected } as PhoneConnection.State.Connected
         assertEquals(false, connected.transferEnabled)
     }
@@ -176,7 +175,7 @@ class PhoneConnectionTest {
     fun failedConnectGivesTheReason() = runBlocking {
         val freePort = ServerSocket(0).use { it.localPort }
         val connection = connection()
-        connection.connect(ServerAddress("127.0.0.1", freePort), TransportConfig.Plaintext)
+        connection.connect(ServerAddress("127.0.0.1", freePort))
         val state = connection.awaitState { it is PhoneConnection.State.Disconnected && it.reason != null }
         assertTrue("could not connect" in (state as PhoneConnection.State.Disconnected).reason!!, "$state")
     }

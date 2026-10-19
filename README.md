@@ -9,7 +9,7 @@ in both directions. It is a Kotlin Multiplatform project.
 ## Requirements
 
 - **Desktop:** Linux. Gradle and a JDK 21 are downloaded automatically by `./gradlew`.
-- **Phone:** Android 10 or newer, with USB debugging on to install the debug build.
+- **Phone:** Android 12 or newer, with USB debugging on to install the debug build.
 - Both devices on the **same Wi-Fi** (guest networks often block devices from reaching each
   other).
 

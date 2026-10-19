@@ -73,6 +73,12 @@ android {
     }
 }
 
+// Unit tests run on JDK 25, like the desktop: the pairing tests need the TLS exporter API
+// (JDK 21 lacks it). The app itself runs on Android, which has its own (SSLSockets).
+tasks.withType<Test>().configureEach {
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) })
+}
+
 // Release guard: refuse to build a release while plaintext is enabled, or if any network
 // security config that a release uses permits cleartext. Only debug/ may allow it.
 val checkNoPlaintextInRelease by tasks.registering {

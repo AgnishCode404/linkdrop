@@ -1,8 +1,9 @@
 [versions]
 agp = "9.1.1"
 android-compileSdk = "37"
-# Android 10: MediaStore Downloads lets the app save received files with no storage permission.
-android-minSdk = "29"
+# Android 12: the pairing code needs SSLSockets.exportKeyingMaterial (API 31). (Android 10 would
+# already allow saving to MediaStore Downloads without a storage permission.)
+android-minSdk = "31"
 android-targetSdk = "37"
 androidx-activity = "1.13.0"
 composeMultiplatform = "1.12.1"
