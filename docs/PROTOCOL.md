@@ -25,19 +25,73 @@ Announcements are not authenticated: anyone on the network can announce anything
 ignores an announcement whose `v` is not its own version, whose `id` is missing or invalid,
 whose port is invalid, or whose address is not a private-network IPv4 address (`10/8`,
 `172.16/12`, `192.168/16`, `169.254/16`), so a fake announcement cannot point it at the
-internet. The name is cleaned like a device name before it is shown. Until pairing exists,
-the user decides whom to trust by name; pairing will bind `id` to a certificate.
+internet. The name is cleaned like a device name before it is shown. Announcements only
+help find an address: whom to trust is decided by pairing (see "Security and pairing").
 
 A desktop announced several times (several network interfaces, or again after an IP change)
-is listed once, by `id`. A phone that remembers a desktop by `id` finds it again after its IP
-address changes.
+is listed once, by `id`. A phone finds a paired desktop again by `id` after its IP address
+changes; the pinned certificate proves it is the same desktop.
+
+## Security and pairing
+
+Code: `protocol/Pairing.kt`.
+
+### Identities
+
+- Each device has a key pair (EC P-256) and a self-signed certificate, created on first run.
+  The phone keeps its key in the Android Keystore; the desktop in a file only its user can
+  read.
+- A device's identity is its **fingerprint**: the lowercase hex SHA-256 of its DER-encoded
+  certificate (64 characters).
+- TLS accepts any certificate; the decision is made afterwards, by fingerprint. The desktop
+  refuses a TLS connection without a client certificate.
+
+### Pairing (first connection)
+
+A phone and a desktop that do not know each other pair, with both users confirming:
+
+```
+phone                                             desktop
+  TLS handshake (both present certificates)  ◀──▶
+  shows the pairing code, asks
+  "Does the desktop show the same code?"
+  user: Yes ──▶ hello
+                                              shows "<name> wants to connect to your device"
+                                              with the same code: Allow / Decline
+                                     ◀── helloAck            (Allow: both store the pairing)
+                                     ◀── error not_allowed   (Decline, or no answer in time)
+```
+
+- **Pairing code:** both ends export `Pairing.EXPORTER_LENGTH` (8) bytes from the TLS session
+  (RFC 8446 section 7.5) with label `EXPORTER-linkdrop-pairing` and context
+  `LinkDrop pairing v1`, read them as an unsigned big-endian 64-bit number, and show it modulo
+  1,000,000 as 6 digits (`482 913`). Both ends of one TLS session get the same code. A
+  man-in-the-middle has two TLS sessions, so the two screens show different codes (unless by a
+  one-in-a-million chance), and the users decline.
+- Each user has `Pairing.CONFIRM_TIMEOUT_SECONDS` (120) to confirm. If the phone's user says
+  the codes differ, the phone closes the connection without sending `hello`.
+- While one pairing is waiting for the desktop's user, any other unpaired phone gets
+  `error{code:"busy"}` and the connection is closed. Paired phones are not affected.
+- After **Allow**, each device stores the other's device id, name and fingerprint.
+
+### Paired devices (later connections)
+
+- **Desktop:** a phone whose certificate fingerprint **and** device id (from `hello`) match a
+  pairing connects without asking. Anything else is treated as unpaired: the user is asked
+  again (e.g. after the phone app was reinstalled and has a new certificate).
+- **Phone:** connecting to a paired desktop pins its fingerprint. A different certificate is
+  refused during the TLS handshake, before any message, and the user is warned. The
+  `helloAck`'s device id must also match the pairing.
+- Because a paired desktop is verified by its certificate, the phone may follow it to a new
+  address found by discovery (same `id`) without asking: an impostor fails the TLS check.
+- Either side can **forget** a pairing; the next connection is then a new pairing.
 
 ## Transport
 
 - One WebSocket connection per session, at path `/v1/session`, default port `47800`.
-- Development builds use `ws://`. Release builds use only `wss://` (TLS with a pinned
-  certificate, set up by pairing). There is no plaintext fallback. Moving to TLS changes
-  nothing below this section.
+- `wss://`: TLS 1.3 with **both** sides presenting a certificate (mutual TLS); see
+  "Security and pairing". There is no plaintext fallback. (A development-only switch allows
+  `ws://` for debugging; release builds refuse it.) TLS changes nothing in the messages.
 - **Text frames** carry control messages (JSON, UTF-8).
 - **Binary frames** carry file bytes (from Slice B).
 - Frames larger than the receiver's own `maxChunkBytes + 4` bytes (one chunk plus its
@@ -79,7 +133,9 @@ other message may be sent before the handshake completes.
 
 The handshake is strict. The listening side answers with `error` and closes when the first
 frame is:
-- not a text frame, or does not arrive within 10 seconds (closed without `error`),
+- not a text frame, or does not arrive in time (closed without `error`): 10 seconds for a
+  paired phone, `Pairing.CONFIRM_TIMEOUT_SECONDS` (120) for an unpaired one, whose user is
+  still comparing the pairing code,
 - malformed (`malformed`),
 - of another envelope `v` (`version_mismatch`),
 - any type other than `hello`, including unknown types (`bad_request`).
@@ -106,7 +162,7 @@ The listening side rejects with:
 
 | Field     | Type    | Meaning |
 |-----------|---------|---------|
-| `code`    | string  | `unsupported_type`, `version_mismatch`, `malformed`, `bad_request`, or a transfer code below. |
+| `code`    | string  | `unsupported_type`, `version_mismatch`, `malformed`, `bad_request`, `not_allowed`, `busy` (see "Security and pairing"), or a transfer code below. |
 | `message` | string? | Human-readable detail, for logs only. |
 | `ref`     | string? | `id` of the message the error is about. |
 

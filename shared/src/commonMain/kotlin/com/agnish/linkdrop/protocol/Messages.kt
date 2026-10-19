@@ -57,6 +57,12 @@ object ErrorCodes {
     const val VERSION_MISMATCH = "version_mismatch"
     const val MALFORMED = "malformed"
     const val BAD_REQUEST = "bad_request"
+
+    /** The desktop's user declined the connection, or did not answer in time. */
+    const val NOT_ALLOWED = "not_allowed"
+
+    /** Another device is already waiting for the desktop's user; try again shortly. */
+    const val BUSY = "busy"
 }
 
 // ---- File transfer (Slice B). Used only when both sides list FEATURE_TRANSFER in the handshake. ----
