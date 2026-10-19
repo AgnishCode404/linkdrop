@@ -23,6 +23,7 @@ dependencies {
     implementation(libs.ktor.serverNetty)
     implementation(libs.ktor.serverWebsockets)
     implementation(libs.jmdns)
+    implementation(libs.bouncycastle.pkix)
     runtimeOnly(libs.slf4j.simple)
 
     testImplementation(libs.kotlin.test)
