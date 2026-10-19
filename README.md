@@ -2,9 +2,9 @@ LinkDrop transfers files between a Linux desktop and an Android phone on the sam
 in both directions. It is a Kotlin Multiplatform project.
 
 > **Not secure yet.** Connections are unencrypted (`ws://`) and not authenticated until TLS
-> and pairing are added (Slice D). Anyone on the same Wi-Fi can read transferred files and
-> can offer files to you. Only use it on a network you trust, and only accept offers you
-> expect.
+> and pairing are added (Slice D). Anyone on the same Wi-Fi can read transferred files, can
+> offer files to you, and can appear in the phone's desktop list under a fake name. Only use
+> it on a network you trust, and only accept offers you expect.
 
 ## Requirements
 
@@ -20,13 +20,18 @@ in both directions. It is a Kotlin Multiplatform project.
 
 ## Using LinkDrop
 
-1. Start the desktop app. Its window shows an address such as `192.168.1.20:47800`.
-2. In the phone app, enter that address and tap **Connect**. The phone appears in the
-   desktop window under "Phones".
+1. Start the desktop app. Its window says how phones see it (e.g. "Phones on this Wi-Fi list
+   this desktop as "Arch"") and shows its address, such as `192.168.1.20:47800`.
+2. Open the phone app. Under **Desktops on this Wi-Fi**, tap the desktop (on Android 17 and
+   newer, allow the local network permission first). If it is not listed, tap **Enter address
+   manually** and type the address from the desktop window. The phone appears in the desktop
+   window under "Phones".
 3. Send files:
    - **Phone → desktop:** tap **Send files**, or use **Send to desktop** in any app's share
-     menu (Gallery, Files, …). Sharing connects to the last desktop used and sends
-     automatically.
+     menu (Gallery, Files, …). Sharing connects to the **last address used** and sends
+     automatically. If the desktop's address has changed, tap it in the list (marked "last
+     used") instead: sharing never follows a desktop to a new address on its own, because
+     anyone on the Wi-Fi could pretend to be it.
    - **Desktop → phone:** click **Send files…** next to the phone.
 4. The receiving side shows an offer (who, which files, total size). Choose **Accept** or
    **Decline**. An offer not answered within 2 minutes is declined.
@@ -65,6 +70,10 @@ adb shell sha256sum /sdcard/Download/LinkDrop/<name>
 - **Phone cannot connect:** check the address and port, that both devices are on the same
   Wi-Fi, and that a desktop firewall (if any) allows TCP port 47800. On Android 17 and newer,
   allow LinkDrop's local network permission.
+- **Desktop not listed on the phone:** the desktop window says whether it is announced. Some
+  routers and guest networks block the multicast traffic discovery needs; then use **Enter
+  address manually**. If the desktop changed networks, restart the desktop app. A desktop
+  firewall must allow mDNS (UDP port 5353) for it to be found.
 - **"Not connected: connection lost: …":** the text after the colon is the real cause (for
   example a ping timeout). The desktop log shows the same reason after "Disconnected".
   Connections can drop when the phone's screen turns off, because Android pauses background
@@ -76,11 +85,13 @@ adb shell sha256sum /sdcard/Download/LinkDrop/<name>
 ## Project layout
 
 * [/shared](./shared/src): code both apps use (no UI).
-  - `protocol`: messages, JSON codec, handshake, file-name rules, chunk format.
+  - `protocol`: messages, JSON codec, handshake, file-name rules, chunk format, and the rules
+    for discovery announcements.
   - `transfer`: the transfer engine (`TransferSession`): queues, progress, SHA-256 checks,
     cancel, and the receiver's safety rules.
-* [/desktopApp](./desktopApp): the Linux app. It runs the server the phone connects to.
-* [/androidApp](./androidApp): the Android app. It connects to the desktop.
+* [/desktopApp](./desktopApp): the Linux app. It runs the server the phone connects to and
+  announces itself on the network (mDNS).
+* [/androidApp](./androidApp): the Android app. It finds desktops on the Wi-Fi and connects.
 * [docs/PROTOCOL.md](./docs/PROTOCOL.md): the wire protocol both apps speak.
 
 All dependency versions are pinned in [gradle/libs.versions.toml](./gradle/libs.versions.toml).
@@ -109,9 +120,11 @@ Until TLS and pairing exist, the apps talk over unencrypted `ws://`. This is con
   desktop JVM and as Android code.
 - `:desktopApp:test`: the desktop server, file storage, and end-to-end transfers over real
   WebSockets. Includes `SlowPhoneTest` (about 15 s), which checks that a phone pausing for 12 s
-  neither drops the connection nor makes the desktop buffer the file in memory.
+  neither drops the connection nor makes the desktop buffer the file in memory, and
+  `DesktopAnnouncerTest` (about 15 s), which announces the desktop with real mDNS on this
+  machine's LAN address and finds it again (skipped without a LAN address).
 - `:androidApp:testDebugUnitTest`: the phone's networking (real OkHttp sockets), including
   50 MB transfers in both directions.
 
-Things only a real phone can check (storage, share menu, screen) are not covered by these
-tests.
+Things only a real phone can check (storage, share menu, screen, finding desktops with
+Android's NsdManager) are not covered by these tests.
