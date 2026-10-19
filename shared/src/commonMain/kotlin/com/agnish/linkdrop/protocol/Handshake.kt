@@ -66,7 +66,9 @@ object Handshake {
     private fun validateIdentity(deviceId: String, deviceName: String): String? = when {
         deviceId.isBlank() || deviceId.length > MAX_DEVICE_FIELD_LENGTH -> "invalid deviceId"
         deviceName.isBlank() || deviceName.length > MAX_DEVICE_FIELD_LENGTH -> "invalid deviceName"
-        deviceName.any { it.isISOControl() } -> "invalid deviceName"
+        // Control characters, and invisible formatting ones (e.g. right-to-left override) that could
+        // disguise the name shown in the desktop's "wants to connect" dialog.
+        deviceName.any { it.isISOControl() || it.category == CharCategory.FORMAT } -> "invalid deviceName"
         else -> null
     }
 }

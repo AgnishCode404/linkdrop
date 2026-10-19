@@ -36,7 +36,8 @@ class HelloServerTest {
     private val logLines: MutableList<String> = Collections.synchronizedList(mutableListOf())
 
     private fun serverTest(block: suspend DefaultClientWebSocketSession.() -> Unit) = testApplication {
-        application { linkDropModule(desktop) { logLines += it } }
+        // Plaintext server: every phone needs approval, so this test approves them all.
+        application { linkDropModule(desktop, ServerHooks(approver = { _, _, _ -> Approval.Allowed })) { logLines += it } }
         wsClient().webSocket(SESSION_PATH) { block() }
     }
 
@@ -58,10 +59,10 @@ class HelloServerTest {
     }
 
     @Test
-    fun tlsConfigRefusesToStartInsteadOfServingPlaintext() {
+    fun tlsWithoutAnIdentityRefusesToStartInsteadOfServingPlaintext() {
         val server = HelloServer(desktop, port = 0, TransportConfig.Tls("ab12"), ServerHooks()) { logLines += it }
         val error = assertFailsWith<IllegalStateException> { server.start() }
-        assertEquals("TLS is not implemented yet", error.message)
+        assertEquals("TLS needs this desktop's identity", error.message)
     }
 
     @Test

@@ -28,7 +28,7 @@ object DesktopDevice {
 
     private fun deviceName(): String {
         val hostname = runCatching { File("/etc/hostname").readText().trim() }.getOrNull()
-        val clean = hostname?.filterNot { it.isISOControl() }?.take(MAX_DEVICE_FIELD_LENGTH)
+        val clean = hostname?.filterNot { it.isISOControl() || it.category == CharCategory.FORMAT }?.take(MAX_DEVICE_FIELD_LENGTH)
         return if (clean.isNullOrBlank()) "Linux desktop" else clean
     }
 

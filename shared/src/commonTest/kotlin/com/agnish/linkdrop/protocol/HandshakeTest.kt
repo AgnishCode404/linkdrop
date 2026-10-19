@@ -33,6 +33,8 @@ class HandshakeTest {
             Hello(tooLong, "Pixel", PROTOCOL_VERSION),
             Hello("p", tooLong, PROTOCOL_VERSION),
             Hello("p", "Pix\nel", PROTOCOL_VERSION),
+            Hello("p", "Pixel\u202Eexe.jpg", PROTOCOL_VERSION), // right-to-left override
+            Hello("p", "Pix\u200Bel", PROTOCOL_VERSION), // zero-width space
         )) {
             val error = assertIs<ErrorMessage>(Handshake.respondTo(hello, "h1", desktop), "for $hello")
             assertEquals(ErrorCodes.BAD_REQUEST, error.code)

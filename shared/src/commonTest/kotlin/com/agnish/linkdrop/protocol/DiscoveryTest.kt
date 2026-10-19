@@ -64,10 +64,10 @@ class DiscoveryTest {
     @Test
     fun namesAreCleaned() {
         assertEquals("Arch", announce(name = "  Arch  ")?.name)
-        assertEquals("Archbox", announce(name = "Arch‮box")?.name)
+        assertEquals("Archbox", announce(name = "Arch\u202Ebox")?.name)
         assertEquals("Arch box", announce(name = "Arch\u0007 box")?.name)
         assertEquals(MAX_DEVICE_FIELD_LENGTH, announce(name = "x".repeat(200))?.name?.length)
-        assertEquals(DiscoveredDesktop.UNNAMED, announce(name = "\u0000​ ")?.name)
+        assertEquals(DiscoveredDesktop.UNNAMED, announce(name = "\u0000\u200B ")?.name)
     }
 
     @Test

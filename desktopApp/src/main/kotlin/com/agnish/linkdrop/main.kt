@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -30,6 +31,7 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.agnish.linkdrop.protocol.DEFAULT_PORT
+import com.agnish.linkdrop.protocol.Fingerprints
 import com.agnish.linkdrop.protocol.LocalDevice
 import com.agnish.linkdrop.protocol.TransferLimits
 import com.agnish.linkdrop.protocol.TransportConfig
@@ -45,13 +47,28 @@ fun main() {
     val receiveDir = DesktopFiles.receiveDir()
     val sink = FolderSink(receiveDir).also { runCatching { it.deleteLeftovers() } }
     val state = DesktopState()
-    val hooks = ServerHooks(sink, state.decider, state::connected, state::disconnected)
+
+    // This desktop's TLS identity and the phones paired with it (~/.local/share/linkdrop).
+    val dataDir = linkDropDataDir()
+    val identityResult = runCatching { DesktopIdentity.loadOrCreate(dataDir, log::add) }
+    val identity = identityResult.getOrNull()
+    val pairedPhones = PairedPhones(dataDir.resolve(PairedPhones.FILE_NAME), log::add)
+    val hooks = ServerHooks(
+        sink, state.decider, state::connected, state::disconnected,
+        approver = state.approver,
+        pairedPhones = pairedPhones,
+    )
 
     // BuildFlags is generated from linkdrop.allowPlaintext (see desktopApp/build.gradle.kts).
-    val transport = TransportConfig.choose(BuildFlags.ALLOW_PLAINTEXT, pinnedCertSha256 = null)
-    val server = transport?.let { HelloServer(local, DEFAULT_PORT, it, hooks, log::add) }
+    // TLS whenever plaintext is not explicitly allowed; never a fallback from one to the other.
+    val transport = when {
+        BuildFlags.ALLOW_PLAINTEXT -> TransportConfig.Plaintext
+        identity != null -> TransportConfig.Tls(identity.fingerprint)
+        else -> null
+    }
+    val server = transport?.let { HelloServer(local, DEFAULT_PORT, it, hooks, identity, log::add) }
     val startError = if (server == null) {
-        TransportConfig.NO_TRANSPORT_MESSAGE
+        "Cannot start: ${identityResult.exceptionOrNull()?.message ?: TransportConfig.NO_TRANSPORT_MESSAGE}"
     } else {
         runCatching { server.start() }.exceptionOrNull()
             ?.let { "Server failed to start on port $DEFAULT_PORT: ${it.message}" }
@@ -75,16 +92,23 @@ fun main() {
             title = "LinkDrop",
             state = rememberWindowState(width = 760.dp, height = 820.dp),
         ) {
-            // Bring the window forward when a phone wants to send something.
+            // Bring the window forward when a phone wants to send something or to connect.
             val offers by state.offers.collectAsState()
             LaunchedEffect(offers.size) { if (offers.isNotEmpty()) window.toFront() }
+            val request by state.request.collectAsState()
+            LaunchedEffect(request) { if (request != null) window.toFront() }
 
             DesktopScreen(
                 local, addresses, transport, startError, receiveDir, state, log, announcer.status,
+                identity, pairedPhones,
                 onSendFiles = { connection -> sendPickedFiles(window, connection, log) },
                 onOpenFolder = { openFolder(receiveDir, log) },
             )
         }
+
+        // "<name> wants to connect to your device": one at a time, centered, above other windows.
+        val request by state.request.collectAsState()
+        request?.let { pending -> key(pending) { ConnectionRequestDialog(pending) } }
     }
 }
 
@@ -119,6 +143,8 @@ fun DesktopScreen(
     state: DesktopState,
     log: EventLog,
     announcement: StateFlow<DesktopAnnouncer.Status>,
+    identity: DesktopIdentity?,
+    pairedPhones: PairedPhones,
     onSendFiles: (PeerConnection) -> Unit,
     onOpenFolder: () -> Unit,
 ) {
@@ -135,6 +161,13 @@ fun DesktopScreen(
             ) {
                 Text("LinkDrop", style = MaterialTheme.typography.headlineSmall)
                 Text("This device: ${local.deviceName}")
+                identity?.let {
+                    Text(
+                        "Identity: ${Fingerprints.short(it.fingerprint)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
                 if (transport == TransportConfig.Plaintext) {
                     Text(
                         "Development build: connections are NOT encrypted.",
@@ -182,6 +215,8 @@ fun DesktopScreen(
                     Text("No phone connected. Tap Connect in the LinkDrop app on your phone.")
                 }
                 connections.forEach { PhoneCard(it, onSend = { onSendFiles(it) }) }
+
+                PairedPhonesList(pairedPhones)
 
                 if (history.isNotEmpty()) {
                     Text("Earlier", style = MaterialTheme.typography.titleMedium)

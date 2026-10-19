@@ -49,7 +49,7 @@ class SlowPhoneTest {
         LocalDevice("desk", "Arch", features = listOf(FEATURE_TRANSFER)),
         port = 0,
         TransportConfig.Plaintext,
-        ServerHooks(onConnected = { connected.complete(it) }),
+        ServerHooks(onConnected = { connected.complete(it) }, approver = { _, _, _ -> Approval.Allowed }),
     ) { synchronized(log) { log += it } }
 
     @AfterTest

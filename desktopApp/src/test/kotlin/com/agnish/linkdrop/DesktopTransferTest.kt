@@ -69,6 +69,7 @@ class DesktopTransferTest {
             decider = state.decider,
             onConnected = { state.connected(it); connected.complete(it) },
             onDisconnected = state::disconnected,
+            approver = { _, _, _ -> Approval.Allowed },
         )
         application { linkDropModule(desktop, hooks) {} }
         val client = createClient { install(WebSockets) }

@@ -41,7 +41,7 @@ object AndroidDevice {
     /** The name the user gave the phone in Settings, or its model name. */
     private fun deviceName(context: Context): String {
         val userName = Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME)
-        val clean = (userName ?: Build.MODEL)?.filterNot { it.isISOControl() }?.trim()?.take(MAX_DEVICE_FIELD_LENGTH)
+        val clean = (userName ?: Build.MODEL)?.filterNot { it.isISOControl() || it.category == CharCategory.FORMAT }?.trim()?.take(MAX_DEVICE_FIELD_LENGTH)
         return if (clean.isNullOrBlank()) "Android phone" else clean
     }
 
