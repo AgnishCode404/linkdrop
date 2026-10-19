@@ -6,6 +6,12 @@ plugins {
     alias(libs.plugins.composeCompiler)
 }
 
+// JDK 25 (LTS): needed for TLS keying material exporters (pairing codes), which JDK 21 lacks.
+// Gradle downloads it automatically (foojay resolver in settings.gradle.kts).
+kotlin {
+    jvmToolchain(25)
+}
+
 dependencies {
     implementation(project(":shared"))
 
@@ -71,6 +77,10 @@ tasks.matching { it.name.startsWith("package") || it.name.endsWith("Distributabl
 compose.desktop {
     application {
         mainClass = "com.agnish.linkdrop.MainKt"
+        // Run and package with the JDK 25 toolchain above. Compose would otherwise use the JDK
+        // running Gradle (21), which lacks the TLS exporter API the pairing code needs.
+        javaHome = javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) }
+            .get().metadata.installationPath.asFile.absolutePath
 
         nativeDistributions {
             targetFormats(TargetFormat.Deb)
