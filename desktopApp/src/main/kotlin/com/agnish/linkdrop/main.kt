@@ -45,7 +45,7 @@ fun main() {
     val log = EventLog()
     val local = DesktopDevice.load()
     val receiveDir = DesktopFiles.receiveDir()
-    val sink = FolderSink(receiveDir).also { runCatching { it.deleteLeftovers() } }
+    val sink = FolderSink(receiveDir).also { runCatching { it.cleanUpPartials() } }
     val state = DesktopState()
 
     // This desktop's TLS identity and the phones paired with it (~/.local/share/linkdrop).

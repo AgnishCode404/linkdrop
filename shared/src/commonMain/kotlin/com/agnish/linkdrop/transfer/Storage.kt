@@ -38,4 +38,11 @@ interface FileWriter {
 
     /** Deletes the partial file. */
     suspend fun abort()
+
+    /**
+     * The connection was lost mid-file: keeps the data written so far, still hidden, with a
+     * [PartialRecord] of [peer] (a paired device's certificate fingerprint) and [bytes], so that
+     * device can resume it. Kept files follow the [Partials] rules.
+     */
+    suspend fun keep(peer: String, bytes: Long)
 }

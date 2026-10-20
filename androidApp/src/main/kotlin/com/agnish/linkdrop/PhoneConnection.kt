@@ -150,6 +150,8 @@ class PhoneConnection(
             receiveChunkBytes = local.maxChunkBytes,
             sink = sink,
             decider = decider,
+            // Set only over TLS, where the desktop is paired (pinned, or paired just now).
+            peerKey = certSha256,
         )
         _state.value = State.Connected(address, ack.deviceId, ack.deviceName, session, transferEnabled, secure = certSha256 != null)
         var reason: String? = null

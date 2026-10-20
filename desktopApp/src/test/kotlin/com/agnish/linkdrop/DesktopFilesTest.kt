@@ -1,5 +1,7 @@
 package com.agnish.linkdrop
 
+import com.agnish.linkdrop.transfer.PartialRecord
+import com.agnish.linkdrop.transfer.Partials
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import java.nio.file.Path
@@ -7,6 +9,7 @@ import kotlin.io.path.createTempDirectory
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
 import kotlin.io.path.readBytes
+import kotlin.io.path.readText
 import kotlin.io.path.writeBytes
 import kotlin.io.path.writeText
 import kotlin.test.AfterTest
@@ -78,10 +81,79 @@ class DesktopFilesTest {
     @Test
     fun leftoverPartFilesAreDeletedOtherFilesKept() {
         root.resolve(".linkdrop-1234.part").writeText("partial")
+        root.resolve(".linkdrop-5678.resume.tmp").writeText("half a record")
         root.resolve("keep.part").writeText("not ours")
         root.resolve("photo.jpg").writeText("x")
-        FolderSink(root).deleteLeftovers()
+        FolderSink(root).cleanUpPartials()
         assertEquals(listOf("keep.part", "photo.jpg"), names(root))
+    }
+
+    private val peer = "a".repeat(64)
+
+    @Test
+    fun keptFileStaysHiddenWithItsRecord() = runBlocking {
+        val writer = FolderSink(root).create("movie.mkv", 10, null)
+        writer.write(byteArrayOf(1, 2, 3))
+        writer.keep(peer, 3)
+
+        val files = names(root)
+        assertEquals(2, files.size, "$files")
+        val part = root.resolve(files.single { it.endsWith(".part") })
+        val record = root.resolve(files.single { it.endsWith(".resume") })
+        assertTrue(part.name.startsWith(".linkdrop-") && record.name.startsWith(".linkdrop-"))
+        assertEquals(part.name.removeSuffix(".part"), record.name.removeSuffix(".resume"))
+        assertContentEquals(byteArrayOf(1, 2, 3), part.readBytes())
+        val saved = assertNotNull(Partials.decode(record.readText()))
+        assertEquals(PartialRecord(peer, "movie.mkv", 10, 3, saved.keptAtMillis), saved)
+
+        // A later start keeps it.
+        FolderSink(root).cleanUpPartials()
+        assertEquals(files, names(root))
+    }
+
+    @Test
+    fun keptFilesExpire() = runBlocking {
+        FolderSink(root).create("movie.mkv", 10, null).apply { write(byteArrayOf(1)) }.keep(peer, 1)
+        FolderSink(root).cleanUpPartials(nowMillis = System.currentTimeMillis() + Partials.MAX_AGE_MILLIS + 60_000)
+        assertTrue(names(root).isEmpty())
+    }
+
+    @Test
+    fun keptFileWithTheWrongLengthIsDeleted() = runBlocking {
+        // As after a crash while writing: the data no longer matches its record.
+        FolderSink(root).create("a.bin", 10, null).apply { write(byteArrayOf(1, 2)) }.keep(peer, 2)
+        root.resolve(names(root).single { it.endsWith(".part") }).writeBytes(byteArrayOf(1, 2, 3))
+        FolderSink(root).cleanUpPartials()
+        assertTrue(names(root).isEmpty(), "${names(root)}")
+    }
+
+    @Test
+    fun recordWithoutItsDataIsDeleted() = runBlocking {
+        FolderSink(root).create("a.bin", 10, null).apply { write(byteArrayOf(1)) }.keep(peer, 1)
+        Files.delete(root.resolve(names(root).single { it.endsWith(".part") }))
+        FolderSink(root).cleanUpPartials()
+        assertTrue(names(root).isEmpty(), "${names(root)}")
+    }
+
+    @Test
+    fun keepingAppliesTheLimit() = runBlocking {
+        val sink = FolderSink(root)
+        repeat(Partials.MAX_KEPT + 2) { sink.create("f$it.bin", 10, null).apply { write(byteArrayOf(1)) }.keep(peer, 1) }
+        assertEquals(Partials.MAX_KEPT, names(root).count { it.endsWith(".resume") })
+        assertEquals(Partials.MAX_KEPT, names(root).count { it.endsWith(".part") })
+    }
+
+    @Test
+    fun cleanupNeverTouchesAFileBeingWritten() = runBlocking {
+        val sink = FolderSink(root)
+        val writing = sink.create("big.bin", 4, null).apply { write(byteArrayOf(1, 2)) }
+        // Another connection's file is kept meanwhile; keeping runs a cleanup.
+        sink.create("other.bin", 10, null).apply { write(byteArrayOf(1)) }.keep(peer, 1)
+        sink.cleanUpPartials()
+
+        writing.write(byteArrayOf(3, 4))
+        assertEquals("big.bin", writing.commit())
+        assertContentEquals(byteArrayOf(1, 2, 3, 4), root.resolve("big.bin").readBytes())
     }
 
     @Test

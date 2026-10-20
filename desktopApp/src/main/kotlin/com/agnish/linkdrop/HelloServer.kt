@@ -217,6 +217,8 @@ private suspend fun DefaultWebSocketServerSession.handleSession(
         receiveChunkBytes = local.maxChunkBytes,
         sink = hooks.sink,
         decider = hooks.decider,
+        // Every TLS peer that got this far is paired (it was paired before or just allowed).
+        peerKey = tls?.certSha256,
         log = log,
     )
     val connection = PeerConnection(hello.deviceName, peer, session, transferEnabled)

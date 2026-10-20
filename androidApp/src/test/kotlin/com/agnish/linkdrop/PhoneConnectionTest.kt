@@ -236,5 +236,6 @@ private class BytesSink : FileSink {
             return name
         }
         override suspend fun abort() = Unit
+        override suspend fun keep(peer: String, bytes: Long) = Unit
     }
 }

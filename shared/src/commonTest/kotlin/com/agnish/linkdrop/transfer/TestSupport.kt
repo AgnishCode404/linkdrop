@@ -116,11 +116,22 @@ class MemorySource(
     }
 }
 
-/** Received files in memory. Never overwrites: picks `name (1).ext` like a real sink must. */
-class MemorySink(private val free: Long? = null) : FileSink {
+/**
+ * Received files in memory. Never overwrites: picks `name (1).ext` like a real sink must.
+ * [failKeep]: [FileWriter.keep] throws, as when the disk is full.
+ */
+class MemorySink(private val free: Long? = null, private val failKeep: Boolean = false) : FileSink {
+    /** One file kept for resuming. */
+    data class Kept(val name: String, val peer: String, val bytes: Long, val data: ByteArray)
+
     val saved = linkedMapOf<String, ByteArray>()
+    val kept = mutableListOf<Kept>()
     private val writing = mutableSetOf<String>()
     var aborted = 0
+        private set
+
+    /** Bytes written so far, by all files. */
+    var written = 0L
         private set
 
     override fun freeBytes(): Long? = free
@@ -133,6 +144,7 @@ class MemorySink(private val free: Long? = null) : FileSink {
 
             override suspend fun write(bytes: ByteArray) {
                 bytes.forEach { buffer += it }
+                written += bytes.size
             }
 
             override suspend fun commit(): String {
@@ -144,6 +156,12 @@ class MemorySink(private val free: Long? = null) : FileSink {
             override suspend fun abort() {
                 writing -= finalName
                 aborted++
+            }
+
+            override suspend fun keep(peer: String, bytes: Long) {
+                if (failKeep) error("disk full")
+                writing -= finalName
+                kept += Kept(finalName, peer, bytes, buffer.toByteArray())
             }
         }
     }

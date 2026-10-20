@@ -5,6 +5,8 @@ import com.agnish.linkdrop.transfer.FileReader
 import com.agnish.linkdrop.transfer.FileSink
 import com.agnish.linkdrop.transfer.FileSource
 import com.agnish.linkdrop.transfer.FileWriter
+import com.agnish.linkdrop.transfer.PartialRecord
+import com.agnish.linkdrop.transfer.Partials
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
@@ -13,8 +15,11 @@ import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.io.path.name
 
 object DesktopFiles {
     /**
@@ -46,15 +51,31 @@ object DesktopFiles {
 /**
  * Saves received files into [dir]. Data goes into a hidden `.linkdrop-<random>.part` file first;
  * only a verified file is renamed to its real name, and existing files are never overwritten.
+ * A file kept for resuming ([FileWriter.keep]) also gets a `.linkdrop-<random>.resume` record.
  */
 class FolderSink(private val dir: Path) : FileSink {
 
-    /** Deletes partial files left behind by a crash or power cut. Call once at startup. */
-    fun deleteLeftovers() {
+    /** Keys of files being written right now (by any connection); a cleanup never touches them. */
+    private val active: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    /**
+     * Deletes what must not stay: partial files left by a crash or power cut (no record), and kept
+     * ones that are expired, damaged or over the limit ([Partials]). Call at startup.
+     */
+    fun cleanUpPartials(nowMillis: Long = System.currentTimeMillis()) {
         if (!Files.isDirectory(dir)) return
-        Files.newDirectoryStream(dir, "$PART_PREFIX*$PART_SUFFIX").use { parts ->
-            parts.forEach { runCatching { Files.deleteIfExists(it) } }
+        val ours = Files.newDirectoryStream(dir, "$PREFIX*").use { entries ->
+            entries.filter { Files.isRegularFile(it, LinkOption.NOFOLLOW_LINKS) && keyOf(it) !in active }
         }
+        val parts = ours.filter { it.name.endsWith(PART_SUFFIX) }.associateBy { keyOf(it) }
+        val records = ours.filter { it.name.endsWith(RECORD_SUFFIX) }.mapNotNull { file ->
+            val record = runCatching { Partials.decode(Files.readString(file)) }.getOrNull()
+            val part = parts[keyOf(file)]
+            val intact = record != null && part != null && runCatching { Files.size(part) }.getOrNull() == record.bytes
+            if (intact) keyOf(file) to record else null
+        }.toMap()
+        val keep = Partials.toKeep(records, nowMillis)
+        ours.filterNot { keyOf(it) in keep }.forEach { runCatching { Files.deleteIfExists(it) } }
     }
 
     override fun freeBytes(): Long? = runCatching {
@@ -64,47 +85,79 @@ class FolderSink(private val dir: Path) : FileSink {
 
     override suspend fun create(name: String, size: Long, mimeType: String?): FileWriter = withContext(Dispatchers.IO) {
         Files.createDirectories(dir)
-        val part = dir.resolve("$PART_PREFIX${UUID.randomUUID()}$PART_SUFFIX")
-        val out = Files.newOutputStream(part, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE).buffered(256 * 1024)
-        PartFileWriter(dir, name, part, out)
+        val key = "$PREFIX${UUID.randomUUID()}"
+        active += key
+        try {
+            val part = dir.resolve("$key$PART_SUFFIX")
+            val out = Files.newOutputStream(part, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)
+            PartFileWriter(name, size, key, out.buffered(256 * 1024))
+        } catch (e: Exception) {
+            active -= key
+            throw e
+        }
     }
 
-    private class PartFileWriter(
-        private val dir: Path,
+    private inner class PartFileWriter(
         private val name: String,
-        private val part: Path,
+        private val size: Long,
+        private val key: String,
         private val out: OutputStream,
     ) : FileWriter {
+        private val part = dir.resolve("$key$PART_SUFFIX")
+
         override suspend fun write(bytes: ByteArray) = withContext(Dispatchers.IO) { out.write(bytes) }
 
         override suspend fun commit(): String = withContext(Dispatchers.IO) {
-            out.close()
-            // Another program could create the same name between our check and the rename; retry then.
-            repeat(MOVE_ATTEMPTS) {
-                val target = FileNames.unique(name) { Files.exists(dir.resolve(it), LinkOption.NOFOLLOW_LINKS) }
-                    ?: throw IOException("no free file name for $name")
-                try {
-                    // No REPLACE_EXISTING: fails instead of overwriting.
-                    Files.move(part, dir.resolve(target))
-                    return@withContext target
-                } catch (e: FileAlreadyExistsException) {
-                    // try the next free name
+            try {
+                out.close()
+                // Another program could create the same name between our check and the rename; retry then.
+                repeat(MOVE_ATTEMPTS) {
+                    val target = FileNames.unique(name) { Files.exists(dir.resolve(it), LinkOption.NOFOLLOW_LINKS) }
+                        ?: throw IOException("no free file name for $name")
+                    try {
+                        // No REPLACE_EXISTING: fails instead of overwriting.
+                        Files.move(part, dir.resolve(target))
+                        return@withContext target
+                    } catch (e: FileAlreadyExistsException) {
+                        // try the next free name
+                    }
                 }
+                throw IOException("could not find a free name for $name")
+            } finally {
+                active -= key
             }
-            throw IOException("could not find a free name for $name")
         }
 
         override suspend fun abort() = withContext(Dispatchers.IO) {
             runCatching { out.close() }
             Files.deleteIfExists(part)
+            active -= key
             Unit
+        }
+
+        override suspend fun keep(peer: String, bytes: Long) = withContext(Dispatchers.IO) {
+            try {
+                out.close()
+                // Written to a temporary name, then renamed: a crash never leaves half a record.
+                val record = dir.resolve("$key$RECORD_SUFFIX")
+                val temp = dir.resolve("$key$RECORD_SUFFIX.tmp")
+                Files.writeString(temp, Partials.encode(PartialRecord(peer, name, size, bytes, System.currentTimeMillis())))
+                Files.move(temp, record, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            } finally {
+                active -= key
+            }
+            cleanUpPartials() // applies the limit of kept files
         }
     }
 
     private companion object {
-        const val PART_PREFIX = ".linkdrop-"
+        const val PREFIX = ".linkdrop-"
         const val PART_SUFFIX = ".part"
+        const val RECORD_SUFFIX = ".resume"
         const val MOVE_ATTEMPTS = 3
+
+        /** `.linkdrop-<random>`, the same for its `.part`, `.resume` and `.resume.tmp` files. */
+        fun keyOf(file: Path): String = "." + file.name.removePrefix(".").substringBefore('.')
     }
 }
 

@@ -64,6 +64,11 @@ class TransferSession(
     /** Where received files go; null if this side cannot receive. */
     private val sink: FileSink?,
     private val decider: OfferDecider,
+    /**
+     * Certificate fingerprint of the paired peer (TLS). With it, a file interrupted by a lost
+     * connection is kept for resuming ([FileWriter.keep]); without it (plaintext) it is deleted.
+     */
+    private val peerKey: String? = null,
     private val log: (String) -> Unit = {},
     private val context: CoroutineContext = Dispatchers.Default.limitedParallelism(1),
 ) {
@@ -626,7 +631,7 @@ class TransferSession(
     }
 
     private suspend fun endAll() {
-        open?.let { runCatching { it.writer.abort() } }
+        open?.let { file -> keepOrAbort(file) }
         open = null
         _transfers.update { list ->
             list.map { t ->
@@ -635,6 +640,30 @@ class TransferSession(
                 })
             }
         }
+    }
+
+    /**
+     * The connection ended with [file] open. Keeps what arrived if the peer is paired and something
+     * did arrive; otherwise (or if keeping fails) deletes it.
+     */
+    private suspend fun keepOrAbort(file: OpenFile) {
+        val peer = peerKey
+        if (peer != null && file.received > 0) {
+            val kept = try {
+                file.writer.keep(peer, file.received)
+                true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log("Could not keep the partial file: ${describe(e)}")
+                false
+            }
+            if (kept) {
+                setStatus(file.transfer.transferId, file.fileId, FileStatus.Failed(CONNECTION_LOST_KEPT))
+                return
+            }
+        }
+        runCatching { file.writer.abort() }
     }
 
     private fun setStatus(transferId: String, fileId: Int, status: FileStatus) {
@@ -681,6 +710,9 @@ class TransferSession(
 
         /** Space kept free on the receiving device beyond the accepted files. */
         const val FREE_SPACE_MARGIN_BYTES = 64L * 1024 * 1024
+
+        /** Status of a received file that was kept for resuming. */
+        const val CONNECTION_LOST_KEPT = "connection lost; the part received so far is kept"
 
         private const val CLOSE_POLICY_VIOLATION = 1008
         private val PROGRESS_INTERVAL = 100.milliseconds

@@ -2,8 +2,10 @@ package com.agnish.linkdrop.transfer
 
 import com.agnish.linkdrop.protocol.DEFAULT_MAX_CHUNK_BYTES
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.random.Random
 import kotlin.test.Test
@@ -11,6 +13,7 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.seconds
 
 /** Two real sessions talking to each other in memory: "desktop" and "phone". */
 class TransferSessionTest {
@@ -29,16 +32,19 @@ class TransferSessionTest {
         phoneDecider: OfferDecider = RecordingDecider.acceptAll(),
         desktopSink: MemorySink = MemorySink(),
         phoneSink: MemorySink = MemorySink(),
+        /** Both sides are paired over TLS: each knows the other's certificate fingerprint. */
+        paired: Boolean = false,
     ): Peers {
         val (d, p) = MemoryChannel.pair()
-        fun session(channel: MemoryChannel, peer: String, sink: MemorySink, decider: OfferDecider) = TransferSession(
-            channel, peer, transferEnabled = true,
-            sendChunkBytes = DEFAULT_MAX_CHUNK_BYTES, receiveChunkBytes = DEFAULT_MAX_CHUNK_BYTES,
-            sink = sink, decider = decider, context = EmptyCoroutineContext,
-        )
+        fun session(channel: MemoryChannel, peer: String, sink: MemorySink, decider: OfferDecider, peerKey: String) =
+            TransferSession(
+                channel, peer, transferEnabled = true,
+                sendChunkBytes = DEFAULT_MAX_CHUNK_BYTES, receiveChunkBytes = DEFAULT_MAX_CHUNK_BYTES,
+                sink = sink, decider = decider, peerKey = peerKey.takeIf { paired }, context = EmptyCoroutineContext,
+            )
         val peers = Peers(
-            session(d, "Phone", desktopSink, desktopDecider),
-            session(p, "Desktop", phoneSink, phoneDecider),
+            session(d, "Phone", desktopSink, desktopDecider, PHONE_KEY),
+            session(p, "Desktop", phoneSink, phoneDecider, DESKTOP_KEY),
             desktopSink, phoneSink, d, p,
         )
         launch { peers.desktop.run() }
@@ -240,6 +246,80 @@ class TransferSessionTest {
         assertTrue(peers.phone.awaitFinished(id).files.all { it.status is FileStatus.Failed })
     }
 
+    /** Waits until [sink] has written at least [bytes] (virtual time: instant). */
+    private suspend fun awaitWritten(sink: MemorySink, bytes: Long) = withTimeout(10.seconds) {
+        while (sink.written < bytes) delay(1)
+    }
+
+    @Test
+    fun connectionLostMidFileFromPairedPeerKeepsThePart() = runTest {
+        val peers = backgroundScope.connect(paired = true)
+        val data = bytes(200_000)
+        val source = MemorySource("big.bin", data, gateAfterBytes = DEFAULT_MAX_CHUNK_BYTES)
+        val id = peers.phone.send(listOf(source))
+        awaitWritten(peers.desktopSink, DEFAULT_MAX_CHUNK_BYTES.toLong())
+
+        peers.phoneChannel.close()
+
+        val received = peers.desktop.awaitFinished(id)
+        assertEquals(FileStatus.Failed(TransferSession.CONNECTION_LOST_KEPT), received.files.single().status)
+        val kept = peers.desktopSink.kept.single()
+        assertEquals("big.bin", kept.name)
+        assertEquals(PHONE_KEY, kept.peer)
+        assertEquals(DEFAULT_MAX_CHUNK_BYTES.toLong(), kept.bytes)
+        assertContentEquals(data.copyOf(DEFAULT_MAX_CHUNK_BYTES), kept.data)
+        assertEquals(0, peers.desktopSink.aborted)
+        assertTrue(peers.desktopSink.saved.isEmpty())
+        // The sender's side is unchanged: it only knows the connection was lost.
+        source.gate.complete(Unit)
+        assertEquals(FileStatus.Failed("connection lost"), peers.phone.awaitFinished(id).files.single().status)
+    }
+
+    @Test
+    fun connectionLostBeforeAnyDataKeepsNothing() = runTest {
+        val peers = backgroundScope.connect(paired = true)
+        val source = MemorySource("big.bin", bytes(200_000), gateAfterBytes = 0)
+        val id = peers.phone.send(listOf(source))
+        peers.desktop.awaitTransfer(id) { it.files[0].status is FileStatus.Transferring }
+
+        peers.phoneChannel.close()
+
+        assertEquals(FileStatus.Failed("connection lost"), peers.desktop.awaitFinished(id).files.single().status)
+        assertTrue(peers.desktopSink.kept.isEmpty())
+        assertEquals(1, peers.desktopSink.aborted)
+        source.gate.complete(Unit)
+    }
+
+    @Test
+    fun cancelFromPairedPeerStillDeletesThePart() = runTest {
+        val peers = backgroundScope.connect(paired = true)
+        val source = MemorySource("big.bin", bytes(200_000), gateAfterBytes = DEFAULT_MAX_CHUNK_BYTES)
+        val id = peers.phone.send(listOf(source))
+        awaitWritten(peers.desktopSink, DEFAULT_MAX_CHUNK_BYTES.toLong())
+
+        peers.phone.cancel(id)
+        source.gate.complete(Unit)
+
+        assertEquals(FileStatus.Cancelled, peers.desktop.awaitFinished(id).files.single().status)
+        assertTrue(peers.desktopSink.kept.isEmpty())
+        assertEquals(1, peers.desktopSink.aborted)
+    }
+
+    @Test
+    fun partIsDeletedIfKeepingItFails() = runTest {
+        val sink = MemorySink(failKeep = true)
+        val peers = backgroundScope.connect(paired = true, desktopSink = sink)
+        val source = MemorySource("big.bin", bytes(200_000), gateAfterBytes = DEFAULT_MAX_CHUNK_BYTES)
+        val id = peers.phone.send(listOf(source))
+        awaitWritten(sink, DEFAULT_MAX_CHUNK_BYTES.toLong())
+
+        peers.phoneChannel.close()
+
+        assertEquals(FileStatus.Failed("connection lost"), peers.desktop.awaitFinished(id).files.single().status)
+        assertEquals(1, sink.aborted)
+        source.gate.complete(Unit)
+    }
+
     @Test
     fun readErrorFailsThatFileAndContinues() = runTest {
         val peers = backgroundScope.connect()
@@ -264,5 +344,10 @@ class TransferSessionTest {
         assertEquals(FileStatus.Failed("the file changed while it was being sent"), sent.files[0].status)
         assertIs<FileStatus.Done>(sent.files[1].status)
         assertEquals(listOf("ok.txt"), peers.desktopSink.saved.keys.toList())
+    }
+
+    private companion object {
+        val PHONE_KEY = "a".repeat(64)
+        val DESKTOP_KEY = "b".repeat(64)
     }
 }

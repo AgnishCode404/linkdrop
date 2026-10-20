@@ -1,9 +1,11 @@
 package com.agnish.linkdrop
 
 import android.content.ContentResolver
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.os.Bundle
 import android.os.Environment
 import android.os.StatFs
 import android.provider.MediaStore
@@ -13,11 +15,15 @@ import com.agnish.linkdrop.transfer.FileReader
 import com.agnish.linkdrop.transfer.FileSink
 import com.agnish.linkdrop.transfer.FileSource
 import com.agnish.linkdrop.transfer.FileWriter
+import com.agnish.linkdrop.transfer.PartialRecord
+import com.agnish.linkdrop.transfer.Partials
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.concurrent.ConcurrentHashMap
 
 /** Received files go to `Downloads/LinkDrop`, shown to the user as this. */
 const val RECEIVE_FOLDER = "Download/LinkDrop"
@@ -25,10 +31,16 @@ const val RECEIVE_FOLDER = "Download/LinkDrop"
 /**
  * Saves received files into Downloads/LinkDrop through MediaStore: no storage permission, and the
  * app can only create its own files there (no access to anything else on the phone).
+ * A file kept for resuming ([FileWriter.keep]) stays pending (hidden), and its [PartialRecord] goes
+ * into the app's private `partials` folder as `<MediaStore id>.resume`.
  */
 class MediaStoreSink(context: Context) : FileSink {
     private val appContext = context.applicationContext
     private val resolver: ContentResolver = appContext.contentResolver
+    private val recordDir = File(appContext.noBackupFilesDir, "partials")
+
+    /** MediaStore ids of files being written right now; a cleanup never touches them. */
+    private val active: MutableSet<Long> = ConcurrentHashMap.newKeySet()
 
     override fun freeBytes(): Long? =
         appContext.getExternalFilesDir(null)?.let { runCatching { StatFs(it.path).availableBytes }.getOrNull() }
@@ -39,43 +51,116 @@ class MediaStoreSink(context: Context) : FileSink {
             // From the file's own extension, not the sender's claim: MediaStore renames files whose
             // extension does not match their MIME type.
             put(MediaStore.Downloads.MIME_TYPE, mimeTypeFor(name))
-            put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/LinkDrop")
+            put(MediaStore.Downloads.RELATIVE_PATH, RELATIVE_PATH)
             // Hidden from other apps until the checksum is verified (commit).
             put(MediaStore.Downloads.IS_PENDING, 1)
         }
         // MediaStore never overwrites: an existing name gets " (1)" etc.
         val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
             ?: throw IOException("could not create $name in Downloads")
+        val id = ContentUris.parseId(uri)
+        active += id
         val out = try {
             resolver.openOutputStream(uri, "w") ?: throw IOException("could not open $name for writing")
         } catch (e: Exception) {
             resolver.delete(uri, null, null)
+            active -= id
             throw e
         }
-        MediaStoreWriter(resolver, uri, out.buffered(256 * 1024))
+        MediaStoreWriter(id, uri, name, size, out.buffered(256 * 1024))
     }
 
-    private class MediaStoreWriter(
-        private val resolver: ContentResolver,
+    /**
+     * Deletes what must not stay: this app's pending files left by a crash or power cut (no
+     * record), and kept ones that are expired, damaged or over the limit ([Partials]). Call at startup.
+     */
+    fun cleanUpPartials(nowMillis: Long = System.currentTimeMillis()) {
+        val files = recordDir.listFiles()?.filter { it.isFile && idOf(it) !in active }.orEmpty()
+        val records = files.filter { it.name.endsWith(RECORD_SUFFIX) }.mapNotNull { file ->
+            val id = idOf(file) ?: return@mapNotNull null
+            val record = runCatching { Partials.decode(file.readText()) }.getOrNull()
+            if (record != null && storedBytes(id) == record.bytes) id to record else null
+        }.toMap()
+        val keep = Partials.toKeep(records, nowMillis)
+        files.filter { idOf(it) !in keep }.forEach { it.delete() }
+        ownPendingIds().filter { it !in keep && it !in active }.forEach { id ->
+            runCatching { resolver.delete(uriOf(id), null, null) }
+        }
+    }
+
+    /** This app's pending (unfinished) files in Downloads/LinkDrop. */
+    private fun ownPendingIds(): List<Long> {
+        val args = Bundle().apply {
+            putInt(MediaStore.QUERY_ARG_MATCH_PENDING, MediaStore.MATCH_INCLUDE)
+            putString(
+                ContentResolver.QUERY_ARG_SQL_SELECTION,
+                "${MediaStore.MediaColumns.IS_PENDING} = 1 AND ${MediaStore.MediaColumns.OWNER_PACKAGE_NAME} = ? " +
+                    "AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?",
+            )
+            putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, arrayOf(appContext.packageName, "$RELATIVE_PATH/"))
+        }
+        val ids = mutableListOf<Long>()
+        runCatching {
+            resolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.MediaColumns._ID), args, null)
+                ?.use { cursor -> while (cursor.moveToNext()) ids += cursor.getLong(0) }
+        }
+        return ids
+    }
+
+    /** The length of a file's stored data, or null if it is gone. */
+    private fun storedBytes(id: Long): Long? =
+        runCatching { resolver.openFileDescriptor(uriOf(id), "r")?.use { it.statSize } }.getOrNull()
+
+    private inner class MediaStoreWriter(
+        private val id: Long,
         private val uri: Uri,
+        private val name: String,
+        private val size: Long,
         private val out: OutputStream,
     ) : FileWriter {
         override suspend fun write(bytes: ByteArray) = withContext(Dispatchers.IO) { out.write(bytes) }
 
         override suspend fun commit(): String = withContext(Dispatchers.IO) {
-            out.close()
-            resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
-            displayName(resolver, uri) ?: "file"
+            try {
+                out.close()
+                resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+                displayName(resolver, uri) ?: "file"
+            } finally {
+                active -= id
+            }
         }
 
         override suspend fun abort() = withContext(Dispatchers.IO) {
             runCatching { out.close() }
             resolver.delete(uri, null, null)
+            active -= id
             Unit
+        }
+
+        override suspend fun keep(peer: String, bytes: Long) = withContext(Dispatchers.IO) {
+            try {
+                out.close()
+                if (!recordDir.isDirectory && !recordDir.mkdirs()) throw IOException("could not create $recordDir")
+                // Written to a temporary name, then renamed: a crash never leaves half a record.
+                val temp = File(recordDir, "$id$RECORD_SUFFIX.tmp")
+                temp.writeText(Partials.encode(PartialRecord(peer, name, size, bytes, System.currentTimeMillis())))
+                if (!temp.renameTo(File(recordDir, "$id$RECORD_SUFFIX"))) throw IOException("could not save the record")
+            } finally {
+                active -= id
+            }
+            cleanUpPartials() // applies the limit of kept files
         }
     }
 
     private companion object {
+        val RELATIVE_PATH = "${Environment.DIRECTORY_DOWNLOADS}/LinkDrop"
+        const val RECORD_SUFFIX = ".resume"
+
+        fun uriOf(id: Long): Uri = ContentUris.withAppendedId(MediaStore.Downloads.EXTERNAL_CONTENT_URI, id)
+
+        /** The MediaStore id in a record's file name (`<id>.resume` or `<id>.resume.tmp`). */
+        fun idOf(file: File): Long? = file.name.substringBefore('.').toLongOrNull()
+
         fun mimeTypeFor(name: String): String {
             val extension = name.substringAfterLast('.', "").lowercase()
             return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "application/octet-stream"
