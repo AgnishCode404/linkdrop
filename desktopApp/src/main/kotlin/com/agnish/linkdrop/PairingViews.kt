@@ -3,9 +3,13 @@ package com.agnish.linkdrop
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -37,13 +41,26 @@ fun ConnectionRequestDialog(request: ConnectionRequest) {
     DialogWindow(
         onCloseRequest = { request.decline() },
         title = "LinkDrop: connection request",
-        state = rememberDialogState(position = WindowPosition(Alignment.Center), width = 480.dp, height = 340.dp),
+        state = rememberDialogState(position = WindowPosition(Alignment.Center), width = 520.dp, height = 460.dp),
         resizable = false,
         alwaysOnTop = true,
     ) {
-        MaterialTheme {
-            Surface(modifier = Modifier.fillMaxSize()) {
-                Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        ConnectionRequestContent(request)
+    }
+}
+
+/** The dialog's contents (separate so a test can render them at the dialog's size). */
+@Composable
+fun ConnectionRequestContent(request: ConnectionRequest) {
+    MaterialTheme {
+        Surface(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                // The text takes the remaining space (and scrolls if it ever does not fit, e.g. a
+                // long name or large system fonts), so the buttons below can never be pushed out.
+                Column(
+                    modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
                     Text(
                         "\"${request.deviceName}\" wants to connect to your device",
                         style = MaterialTheme.typography.titleLarge,
@@ -70,18 +87,29 @@ fun ConnectionRequestDialog(request: ConnectionRequest) {
                         "Declined automatically in ${Pairing.CONFIRM_TIMEOUT_SECONDS / 60} minutes.",
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
-                        modifier = Modifier.fillMaxWidth(),
+                }
+                Spacer(Modifier.height(16.dp))
+                // Large, equal-width buttons that are easy to hit; Decline on the left, Allow on the right.
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { request.decline() },
+                        modifier = Modifier.weight(1f).height(DIALOG_BUTTON_HEIGHT),
                     ) {
-                        OutlinedButton(onClick = { request.decline() }) { Text("Decline") }
-                        Button(onClick = { request.allow() }) { Text("Allow") }
+                        Text("Decline", style = MaterialTheme.typography.titleMedium)
+                    }
+                    Button(
+                        onClick = { request.allow() },
+                        modifier = Modifier.weight(1f).height(DIALOG_BUTTON_HEIGHT),
+                    ) {
+                        Text("Allow", style = MaterialTheme.typography.titleMedium)
                     }
                 }
             }
         }
     }
 }
+
+private val DIALOG_BUTTON_HEIGHT = 56.dp
 
 /** "Paired phones": they connect without asking. Forget makes the next connection ask again. */
 @Composable
