@@ -25,6 +25,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
@@ -40,6 +43,7 @@ import java.awt.FileDialog
 import java.awt.Frame
 import java.nio.file.Files
 import java.nio.file.Path
+import javax.imageio.ImageIO
 
 fun main() {
     val log = EventLog()
@@ -82,6 +86,7 @@ fun main() {
         Thread({ announcer.start(addresses) }, "mdns-announce").apply { isDaemon = true }.start()
     }
 
+    val icon = appIcon()
     application {
         Window(
             onCloseRequest = {
@@ -90,6 +95,7 @@ fun main() {
                 exitApplication()
             },
             title = "LinkDrop",
+            icon = icon,
             state = rememberWindowState(width = 760.dp, height = 820.dp),
         ) {
             // Bring the window forward when a phone wants to send something or to connect.
@@ -111,6 +117,13 @@ fun main() {
         request?.let { pending -> key(pending) { ConnectionRequestDialog(pending) } }
     }
 }
+
+/** The app icon (desktopApp/icons) for the window, or null if it cannot be read. */
+private fun appIcon(): Painter? = runCatching {
+    DesktopFiles::class.java.getResourceAsStream("/linkdrop.png")?.use { input ->
+        ImageIO.read(input)?.let { BitmapPainter(it.toComposeImageBitmap()) }
+    }
+}.getOrNull()
 
 /** Lets the user pick files (system file chooser) and queues them for [connection]. */
 private fun sendPickedFiles(parent: Frame, connection: PeerConnection, log: EventLog) {

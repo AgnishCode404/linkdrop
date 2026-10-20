@@ -1,0 +1,46 @@
+# LinkDrop desktop app for Arch Linux, built from this repository.
+#
+#   cd packaging/arch && makepkg -si
+#
+# build() runs Gradle in the repository two folders up (it downloads the pinned dependencies and
+# JDK 25 on first use). The app ships with its own Java runtime, in /opt/linkdrop.
+# Remove it with: sudo pacman -R linkdrop
+
+pkgname=linkdrop
+# Must match packageVersion in desktopApp/build.gradle.kts (package() checks it).
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Send files between this computer and an Android phone over local Wi-Fi"
+arch=('x86_64')
+# No license has been chosen for LinkDrop yet.
+license=('LicenseRef-unknown')
+# What the bundled Java runtime and the Compose/Skia UI load from the system.
+depends=('glibc' 'gcc-libs' 'zlib' 'libx11' 'libxext' 'libxi' 'libxrender' 'libxtst'
+         'fontconfig' 'freetype2' 'libgl' 'alsa-lib')
+# The bundled runtime must not be stripped; no separate debug package.
+options=('!strip' '!debug')
+
+_repo="$startdir/../.."
+_app="$_repo/desktopApp/build/compose/binaries/main/app/linkdrop"
+
+build() {
+    cd "$_repo"
+    # Fails on purpose if linkdrop.allowPlaintext=true: releases are TLS only.
+    ./gradlew --no-daemon --console=plain :desktopApp:createDistributable
+}
+
+package() {
+    if ! grep -qx "java-options=-Djpackage.app-version=$pkgver" "$_app/lib/app/linkdrop.cfg"; then
+        echo "pkgver $pkgver does not match packageVersion in desktopApp/build.gradle.kts" >&2
+        return 1
+    fi
+
+    install -d "$pkgdir/opt"
+    cp -a "$_app" "$pkgdir/opt/linkdrop"
+    install -d "$pkgdir/usr/bin"
+    ln -s /opt/linkdrop/bin/linkdrop "$pkgdir/usr/bin/linkdrop"
+
+    install -Dm644 "$startdir/linkdrop.desktop" "$pkgdir/usr/share/applications/linkdrop.desktop"
+    install -Dm644 "$_repo/desktopApp/icons/linkdrop.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/linkdrop.svg"
+    install -Dm644 "$_repo/desktopApp/icons/linkdrop.png" "$pkgdir/usr/share/icons/hicolor/512x512/apps/linkdrop.png"
+}

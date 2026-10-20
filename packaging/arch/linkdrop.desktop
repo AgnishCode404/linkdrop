@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=LinkDrop
+GenericName=File Transfer
+Comment=Send files between this computer and your Android phone over Wi-Fi
+Exec=linkdrop
+Icon=linkdrop
+Terminal=false
+Categories=Network;FileTransfer;
+Keywords=phone;android;send;share;wifi;
+# The window's class (AWT names it after the main class), so the dock groups it with this entry.
+StartupWMClass=com-agnish-linkdrop-MainKt

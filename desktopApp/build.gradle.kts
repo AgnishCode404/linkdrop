@@ -57,7 +57,12 @@ val generateBuildFlags by tasks.registering {
         )
     }
 }
-kotlin.sourceSets.main { kotlin.srcDir(generateBuildFlags) }
+kotlin.sourceSets.main {
+    kotlin.srcDir(generateBuildFlags)
+    // The app icon, also used for the window at runtime. linkdrop.png is rendered from linkdrop.svg:
+    //   rsvg-convert -w 512 -h 512 icons/linkdrop.svg -o icons/linkdrop.png
+    resources.srcDir("icons")
+}
 
 // Release guard: packaging (.deb, distributables) is refused while plaintext is enabled.
 val checkNoPlaintextInRelease by tasks.registering {
@@ -82,11 +87,21 @@ compose.desktop {
         // running Gradle (21), which lacks the TLS exporter API the pairing code needs.
         javaHome = javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(25)) }
             .get().metadata.installationPath.asFile.absolutePath
+        // Netty loads its native transport with System.loadLibrary; JDK 25 warns about that (and
+        // a later JDK will refuse it) unless native access is allowed. The app runs on the class
+        // path, i.e. in the unnamed module.
+        jvmArgs += "--enable-native-access=ALL-UNNAMED"
 
         nativeDistributions {
+            // .deb for Debian/Ubuntu (needs dpkg-deb). Arch: packaging/arch/PKGBUILD, which
+            // packages createDistributable's output instead.
             targetFormats(TargetFormat.Deb)
             packageName = "linkdrop"
+            // Also the Arch package's pkgver (packaging/arch/PKGBUILD checks that they match).
             packageVersion = "1.0.0"
+            linux {
+                iconFile.set(project.file("icons/linkdrop.png"))
+            }
         }
     }
 }
