@@ -131,6 +131,46 @@ adb shell sha256sum /sdcard/Download/LinkDrop/<name>
 
 All dependency versions are pinned in [gradle/libs.versions.toml](./gradle/libs.versions.toml).
 
+## Release builds
+
+**Version.** Both apps take their version from `linkdrop.version` in
+[gradle.properties](./gradle.properties) (for example `1.2.3`). Android's version code is derived
+from it (`1.2.3` → `10203`): raise the version for every release you install, never lower it.
+The Arch package's `pkgver` in [packaging/arch/PKGBUILD](./packaging/arch/PKGBUILD) must match.
+
+**Android signing key.** An Android app can only be updated by an APK signed with the same key,
+so make one key once and keep it safe:
+
+1. Create it **outside this repository** (keytool comes with any JDK; Gradle's own is in
+   `~/.gradle/jdks/*/bin/`). It asks for a password:
+
+   ```
+   mkdir -p -m 700 ~/.config/linkdrop-signing
+   keytool -genkeypair -keystore ~/.config/linkdrop-signing/release.p12 -storetype PKCS12 \
+       -alias linkdrop -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=LinkDrop"
+   chmod 600 ~/.config/linkdrop-signing/release.p12
+   ```
+
+2. Tell Gradle where it is, in your **user** file `~/.gradle/gradle.properties` (not the
+   project's), then `chmod 600 ~/.gradle/gradle.properties`:
+
+   ```
+   linkdrop.signing.storeFile=/home/YOU/.config/linkdrop-signing/release.p12
+   linkdrop.signing.storePassword=the password
+   linkdrop.signing.keyAlias=linkdrop
+   ```
+
+3. `./gradlew :androidApp:assembleRelease` then writes the signed
+   `androidApp/build/outputs/apk/release/androidApp-release.apk`. Install it with
+   `adb install androidApp-release.apk` (uninstall the debug build first: they are signed with
+   different keys, and uninstalling removes the phone's pairing, so pair again afterwards).
+
+**Back up `release.p12` and its password** somewhere other than this computer. If either is
+lost, phones cannot update the app any more: it has to be uninstalled and paired again.
+
+Without the `linkdrop.signing.*` settings the release APK is built unsigned (a warning says so).
+The build refuses a key that is inside the repository, so it cannot be committed by accident.
+
 ## Plaintext development mode (debugging only)
 
 By default every connection is TLS with pairing. For debugging, unencrypted `ws://` can be

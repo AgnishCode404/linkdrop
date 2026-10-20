@@ -8,6 +8,25 @@ plugins {
 /** Development switch from gradle.properties; see the comment there. */
 val allowPlaintext = providers.gradleProperty("linkdrop.allowPlaintext").map { it.toBoolean() }.orElse(false)
 
+/** linkdrop.version (gradle.properties), e.g. 1.2.3, and its versionCode, e.g. 10203. */
+val appVersion: String = providers.gradleProperty("linkdrop.version").get()
+val appVersionCode: Int = run {
+    val parts = Regex("""(\d{1,2})\.(\d{1,2})\.(\d{1,2})""").matchEntire(appVersion)?.destructured?.toList()
+        ?: throw GradleException("linkdrop.version must look like 1.2.3 (each part 0-99), not \"$appVersion\"")
+    parts.fold(0) { code, part -> code * 100 + part.toInt() }
+}
+
+/**
+ * The release signing key: a keystore OUTSIDE this repository, named by these properties in
+ * ~/.gradle/gradle.properties (never in the project's own gradle.properties). See README.
+ * Without them the release APK is built unsigned.
+ */
+val signingStoreFile = providers.gradleProperty("linkdrop.signing.storeFile")
+val signingStorePassword = providers.gradleProperty("linkdrop.signing.storePassword")
+val signingKeyAlias = providers.gradleProperty("linkdrop.signing.keyAlias")
+val signingKeyPassword = providers.gradleProperty("linkdrop.signing.keyPassword")
+val releaseSigning = signingStoreFile.isPresent
+
 kotlin {
     compilerOptions {
         jvmTarget = JvmTarget.JVM_11
@@ -41,8 +60,20 @@ android {
         applicationId = "com.agnish.linkdrop"
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = appVersionCode
+        versionName = appVersion
+    }
+    signingConfigs {
+        if (releaseSigning) {
+            create("release") {
+                storeFile = file(signingStoreFile.get())
+                storePassword = signingStorePassword.orNull
+                    ?: throw GradleException("linkdrop.signing.storePassword is missing")
+                keyAlias = signingKeyAlias.orNull ?: throw GradleException("linkdrop.signing.keyAlias is missing")
+                keyPassword = signingKeyPassword.orNull ?: storePassword
+                storeType = "PKCS12"
+            }
+        }
     }
     packaging {
         resources {
@@ -56,6 +87,7 @@ android {
         release {
             // Never plaintext in a release, regardless of linkdrop.allowPlaintext.
             buildConfigField("boolean", "ALLOW_PLAINTEXT", "false")
+            if (releaseSigning) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -100,3 +132,24 @@ val checkNoPlaintextInRelease by tasks.registering {
     }
 }
 tasks.matching { it.name == "preReleaseBuild" }.configureEach { dependsOn(checkNoPlaintextInRelease) }
+
+// Signing guard: the key must never be inside the repository (where it could be committed), and
+// a release without a key is built unsigned (it cannot be installed) with a clear note.
+val checkReleaseSigning by tasks.registering {
+    val store = signingStoreFile.map { file(it).canonicalFile }
+    val repo = rootDir.canonicalFile
+    inputs.property("signing", signingStoreFile.orElse(""))
+    doLast {
+        if (!store.isPresent) {
+            logger.warn(
+                "No release signing key (linkdrop.signing.* in ~/.gradle/gradle.properties): " +
+                    "the release APK is UNSIGNED and cannot be installed. See README.",
+            )
+            return@doLast
+        }
+        val key = store.get()
+        if (key.startsWith(repo)) throw GradleException("The signing key must not be inside the repository: $key")
+        if (!key.isFile) throw GradleException("Signing key not found: $key")
+    }
+}
+tasks.matching { it.name == "preReleaseBuild" }.configureEach { dependsOn(checkReleaseSigning) }

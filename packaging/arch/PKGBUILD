@@ -7,7 +7,7 @@
 # Remove it with: sudo pacman -R linkdrop
 
 pkgname=linkdrop
-# Must match packageVersion in desktopApp/build.gradle.kts (package() checks it).
+# Must match linkdrop.version in gradle.properties (package() checks it).
 pkgver=1.0.0
 pkgrel=1
 pkgdesc="Send files between this computer and an Android phone over local Wi-Fi"
@@ -31,7 +31,7 @@ build() {
 
 package() {
     if ! grep -qx "java-options=-Djpackage.app-version=$pkgver" "$_app/lib/app/linkdrop.cfg"; then
-        echo "pkgver $pkgver does not match packageVersion in desktopApp/build.gradle.kts" >&2
+        echo "pkgver $pkgver does not match linkdrop.version in gradle.properties" >&2
         return 1
     fi
 

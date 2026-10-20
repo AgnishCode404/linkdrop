@@ -97,8 +97,8 @@ compose.desktop {
             // packages createDistributable's output instead.
             targetFormats(TargetFormat.Deb)
             packageName = "linkdrop"
-            // Also the Arch package's pkgver (packaging/arch/PKGBUILD checks that they match).
-            packageVersion = "1.0.0"
+            // linkdrop.version (gradle.properties); packaging/arch/PKGBUILD checks its pkgver against it.
+            packageVersion = providers.gradleProperty("linkdrop.version").get()
             linux {
                 iconFile.set(project.file("icons/linkdrop.png"))
             }
