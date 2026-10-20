@@ -21,15 +21,27 @@ class PeerConnection(
     val session: TransferSession,
     /** False if the phone's app is too old for file transfer. */
     val transferEnabled: Boolean,
-)
+    /** The phone's device id, from its `hello`. */
+    val peerId: String = "",
+    /** The phone's certificate fingerprint (TLS); null over plaintext (development only). */
+    val peerKey: String? = null,
+) {
+    /** The same phone as [other]: the same device id and the same certificate. */
+    fun isSamePhone(other: PeerConnection) = peerId == other.peerId && peerKey == other.peerKey
+}
 
 /** An offer shown in the window until the user answers (or it times out). */
 class PendingOffer(val offer: IncomingOffer) {
     val answer = CompletableDeferred<Boolean>()
 }
 
-/** A finished transfer kept after its phone disconnected. */
-data class PastTransfer(val peerName: String, val progress: TransferProgress)
+/**
+ * A transfer kept after its phone disconnected. [retried]: its interrupted files were sent again
+ * (Retry), so it cannot be retried twice.
+ */
+data class PastTransfer(val peer: PeerConnection, val progress: TransferProgress, val retried: Boolean = false) {
+    val peerName: String get() = peer.name
+}
 
 /**
  * What the desktop window shows. Updated from server threads; read by the UI.
@@ -69,7 +81,29 @@ class DesktopState(private val approvalTimeout: Duration = Pairing.CONFIRM_TIMEO
 
     fun disconnected(connection: PeerConnection) {
         _connections.update { it - connection }
-        _history.update { past -> past + connection.session.transfers.value.map { PastTransfer(connection.name, it) } }
+        _history.update { past -> past + connection.session.transfers.value.map { PastTransfer(connection, it) } }
+    }
+
+    /**
+     * Where [past] can be retried: the same phone, connected again, if it can transfer files and
+     * some of [past]'s files were cut off by the lost connection. Null if it cannot be retried.
+     */
+    fun retryTarget(past: PastTransfer, connections: List<PeerConnection> = this.connections.value): PeerConnection? {
+        if (past.retried || past.peer.session.interruptedFiles(past.progress.transferId).isEmpty()) return null
+        return connections.firstOrNull { it.transferEnabled && it.isSamePhone(past.peer) }
+    }
+
+    /** Sends [past]'s interrupted files again to the same phone; they resume where possible. */
+    fun retry(past: PastTransfer) {
+        val target = retryTarget(past) ?: return
+        val id = past.progress.transferId
+        var first = false
+        _history.update { list ->
+            first = false // update may run this more than once
+            list.map { if (it.progress.transferId == id && !it.retried) it.copy(retried = true).also { first = true } else it }
+        }
+        // Only once, even if Retry is clicked twice quickly.
+        if (first) target.session.send(past.peer.session.interruptedFiles(id))
     }
 
     /** Asks the user in the window. The offer disappears when answered or when the session gives up. */

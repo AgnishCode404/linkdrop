@@ -308,7 +308,7 @@ fun PhoneScreen(
                         shareTransferIds.isNotEmpty() -> ShareProgress.Sending(
                             peerName = connected?.peerName ?: "desktop",
                             finished = shareTransferIds.all { id ->
-                                (transfers + history).firstOrNull { it.transferId == id }?.finished ?: false
+                                (transfers + history.map { it.progress }).firstOrNull { it.transferId == id }?.finished ?: false
                             },
                         )
                         sources == null -> ShareProgress.Reading
@@ -342,7 +342,14 @@ fun PhoneScreen(
                 transfers.asReversed().forEach { t ->
                     TransferCard(peerName, t, onCancel = { connected?.session?.cancel(t.transferId) })
                 }
-                history.asReversed().forEach { TransferCard("desktop", it, onCancel = null) }
+                history.asReversed().forEach { past ->
+                    val canRetry = connection.retryTarget(past, state) != null
+                    TransferCard(
+                        past.peerName, past.progress, onCancel = null,
+                        onRetry = if (canRetry) ({ connection.retry(past) }) else null,
+                        retried = past.retried,
+                    )
+                }
             }
         }
     }

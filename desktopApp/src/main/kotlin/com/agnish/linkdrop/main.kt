@@ -220,7 +220,14 @@ fun DesktopScreen(
 
                 if (history.isNotEmpty()) {
                     Text("Earlier", style = MaterialTheme.typography.titleMedium)
-                    history.asReversed().forEach { TransferCard(it.peerName, it.progress, onCancel = null) }
+                    history.asReversed().forEach { past ->
+                        val canRetry = state.retryTarget(past, connections) != null
+                        TransferCard(
+                            past.peerName, past.progress, onCancel = null,
+                            onRetry = if (canRetry) ({ state.retry(past) }) else null,
+                            retried = past.retried,
+                        )
+                    }
                 }
 
                 HorizontalDivider()

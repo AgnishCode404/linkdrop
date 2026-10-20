@@ -20,6 +20,19 @@ import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.time.Instant
 
+/**
+ * A transfer kept after disconnecting, with the desktop it was with. [retried]: its interrupted
+ * files were sent again (Retry), so it cannot be retried twice.
+ */
+data class PastTransfer(
+    val peerId: String,
+    val peerKey: String?,
+    val peerName: String,
+    val session: TransferSession,
+    val progress: TransferProgress,
+    val retried: Boolean = false,
+)
+
 /** An offer shown on screen until the user answers (or it times out). */
 class PendingOffer(val offer: IncomingOffer) {
     val answer = CompletableDeferred<Boolean>()
@@ -68,9 +81,12 @@ class PhoneConnection(
             val session: TransferSession,
             /** False if the desktop app is too old for file transfer. */
             val transferEnabled: Boolean,
+            /** The desktop's certificate fingerprint (TLS); null over plaintext (development only). */
+            val peerKey: String?,
+        ) : State {
             /** True over TLS with a paired desktop; false over plaintext (development only). */
-            val secure: Boolean,
-        ) : State
+            val secure: Boolean get() = peerKey != null
+        }
     }
 
     private val _state = MutableStateFlow<State>(State.Disconnected())
@@ -80,8 +96,8 @@ class PhoneConnection(
     val offers: StateFlow<List<PendingOffer>> = _offers.asStateFlow()
 
     /** Transfers from earlier connections, kept after disconnecting. */
-    private val _history = MutableStateFlow<List<TransferProgress>>(emptyList())
-    val history: StateFlow<List<TransferProgress>> = _history.asStateFlow()
+    private val _history = MutableStateFlow<List<PastTransfer>>(emptyList())
+    val history: StateFlow<List<PastTransfer>> = _history.asStateFlow()
 
     private var job: Job? = null
     private var channel: OkHttpFrameChannel? = null
@@ -153,19 +169,45 @@ class PhoneConnection(
             // Set only over TLS, where the desktop is paired (pinned, or paired just now).
             peerKey = certSha256,
         )
-        _state.value = State.Connected(address, ack.deviceId, ack.deviceName, session, transferEnabled, secure = certSha256 != null)
+        _state.value = State.Connected(address, ack.deviceId, ack.deviceName, session, transferEnabled, peerKey = certSha256)
         var reason: String? = null
         try {
             reason = session.run()
         } finally {
             opened.channel.close(1000, "bye")
             channel = null
-            _history.update { it + session.transfers.value }
+            _history.update { past ->
+                past + session.transfers.value.map { PastTransfer(ack.deviceId, certSha256, ack.deviceName, session, it) }
+            }
             // Show the real cause (e.g. a ping timeout), not just "connection lost".
             _state.value = State.Disconnected(
                 if (userDisconnected) null else "connection lost" + (reason?.let { ": $it" } ?: ""),
             )
         }
+    }
+
+    /**
+     * Where [past] can be retried: the session with the same desktop, connected again, if it can
+     * transfer files and some of [past]'s files were cut off by the lost connection. Else null.
+     */
+    fun retryTarget(past: PastTransfer, state: State = this.state.value): TransferSession? {
+        if (past.retried || past.session.interruptedFiles(past.progress.transferId).isEmpty()) return null
+        val connected = state as? State.Connected ?: return null
+        val same = connected.peerId == past.peerId && connected.peerKey == past.peerKey
+        return connected.session.takeIf { same && connected.transferEnabled }
+    }
+
+    /** Sends [past]'s interrupted files again to the same desktop; they resume where possible. */
+    fun retry(past: PastTransfer) {
+        val target = retryTarget(past) ?: return
+        val id = past.progress.transferId
+        var first = false
+        _history.update { list ->
+            first = false // update may run this more than once
+            list.map { if (it.progress.transferId == id && !it.retried) it.copy(retried = true).also { first = true } else it }
+        }
+        // Only once, even if Retry is tapped twice quickly.
+        if (first) target.send(past.session.interruptedFiles(id))
     }
 
     /** Disconnects, or cancels connecting or pairing. */

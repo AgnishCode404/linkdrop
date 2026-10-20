@@ -79,6 +79,9 @@ class TransferSession(
     private val _transfers = MutableStateFlow<List<TransferProgress>>(emptyList())
     val transfers: StateFlow<List<TransferProgress>> = _transfers.asStateFlow()
 
+    /** The files of each transfer this side sends, by transferId (for [interruptedFiles]). */
+    private val sentFiles = MutableStateFlow<Map<String, List<FileSource>>>(emptyMap())
+
     private val sendQueue = Channel<Outgoing>(Channel.UNLIMITED)
     private val cancelRequests = Channel<String>(Channel.UNLIMITED)
     private val offerQueue = Channel<TransferOffer>(Channel.UNLIMITED)
@@ -106,10 +109,23 @@ class TransferSession(
             "a transfer has 1 to ${TransferLimits.MAX_FILES_PER_OFFER} files"
         }
         val transfer = Outgoing(ProtocolCodec.newMessageId(), files)
+        sentFiles.update { it + (transfer.transferId to files) }
         val progress = files.mapIndexed { i, f -> FileProgress(i, f.name, f.size, FileStatus.Waiting) }
         _transfers.update { it + TransferProgress(transfer.transferId, Direction.Outgoing, progress) }
         sendQueue.trySend(transfer)
         return transfer.transferId
+    }
+
+    /**
+     * The files of an outgoing transfer that were cut off by the lost connection (also those not
+     * started yet). Sending them again on a new connection resumes them where possible (Retry).
+     * Empty for incoming transfers and for files that finished, failed otherwise or were declined.
+     */
+    fun interruptedFiles(transferId: String): List<FileSource> {
+        val transfer = transfers.value.firstOrNull { it.transferId == transferId && it.direction == Direction.Outgoing }
+        val files = sentFiles.value[transferId]
+        if (transfer == null || files == null) return emptyList()
+        return transfer.files.filter { it.status == FileStatus.Failed(CONNECTION_LOST) }.mapNotNull { files.getOrNull(it.fileId) }
     }
 
     /** Cancels a transfer in either direction. Does nothing if it already finished. */
@@ -744,7 +760,14 @@ class TransferSession(
             when {
                 outgoing != null -> outgoing.replies.send(Reply.LocalCancel)
                 transferId in incomingById -> cancelIncoming(transferId, null, byPeer = false)
-                else -> cancelledBeforeStart += transferId // queued, not started yet
+                else -> {
+                    cancelledBeforeStart += transferId // queued, not started yet
+                    // Shown as cancelled now, not when its turn comes: if the connection ends first,
+                    // it must not count as interrupted (Retry would send it after all).
+                    if (_transfers.value.any { it.transferId == transferId && it.direction == Direction.Outgoing }) {
+                        markRemaining(transferId, FileStatus.Cancelled)
+                    }
+                }
             }
         }
     }
@@ -767,7 +790,7 @@ class TransferSession(
         _transfers.update { list ->
             list.map { t ->
                 if (t.finished) t else t.copy(files = t.files.map { f ->
-                    if (f.status.isFinal) f else f.copy(status = FileStatus.Failed("connection lost"))
+                    if (f.status.isFinal) f else f.copy(status = FileStatus.Failed(CONNECTION_LOST))
                 })
             }
         }
@@ -841,6 +864,9 @@ class TransferSession(
 
         /** Space kept free on the receiving device beyond the accepted files. */
         const val FREE_SPACE_MARGIN_BYTES = 64L * 1024 * 1024
+
+        /** Status of a file that was unfinished when the connection ended. */
+        const val CONNECTION_LOST = "connection lost"
 
         /** Status of a received file that was kept for resuming. */
         const val CONNECTION_LOST_KEPT = "connection lost; the part received so far is kept"

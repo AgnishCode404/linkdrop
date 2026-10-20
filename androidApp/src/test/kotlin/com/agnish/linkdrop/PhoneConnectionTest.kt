@@ -147,7 +147,7 @@ class PhoneConnectionTest {
 
         connection.disconnect()
         assertEquals(PhoneConnection.State.Disconnected(null), connection.awaitState { it is PhoneConnection.State.Disconnected })
-        assertEquals(listOf(id), connection.history.value.map { it.transferId })
+        assertEquals(listOf(id), connection.history.value.map { it.progress.transferId })
     }
 
     @Test

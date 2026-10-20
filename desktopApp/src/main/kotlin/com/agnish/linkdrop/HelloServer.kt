@@ -221,7 +221,7 @@ private suspend fun DefaultWebSocketServerSession.handleSession(
         peerKey = tls?.certSha256,
         log = log,
     )
-    val connection = PeerConnection(hello.deviceName, peer, session, transferEnabled)
+    val connection = PeerConnection(hello.deviceName, peer, session, transferEnabled, hello.deviceId, tls?.certSha256)
     hooks.onConnected(connection)
     var reason: String? = null
     try {

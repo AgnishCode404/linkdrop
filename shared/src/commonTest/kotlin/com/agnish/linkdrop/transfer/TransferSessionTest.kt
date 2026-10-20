@@ -333,10 +333,12 @@ class TransferSessionTest {
         source.gate.complete(Unit)
         val keptBytes = desktopSink.kept.single().bytes
 
-        // The phone connects again and sends the same file.
+        // The phone connects again and sends what was cut off (as Retry does).
         val second = backgroundScope.connect(paired = true, desktopSink = desktopSink)
         val writtenBefore = desktopSink.written
-        val id = second.phone.send(listOf(MemorySource("big.bin", data)))
+        val retry = first.phone.interruptedFiles(lost)
+        assertEquals(listOf<FileSource>(source), retry)
+        val id = second.phone.send(retry)
 
         assertEquals(FileStatus.Done("big.bin"), second.desktop.awaitFinished(id).files.single().status)
         assertEquals(FileStatus.Done(), second.phone.awaitFinished(id).files.single().status)
@@ -344,6 +346,32 @@ class TransferSessionTest {
         // Only the rest was sent.
         assertEquals(data.size - keptBytes, desktopSink.written - writtenBefore)
         assertTrue(desktopSink.kept.isEmpty())
+    }
+
+    @Test
+    fun interruptedFilesAreThoseCutOffByTheLostConnection() = runTest {
+        val peers = backgroundScope.connect()
+        val done = MemorySource("a.bin", bytes(10))
+        val cut = MemorySource("b.bin", bytes(200_000), gateAfterBytes = DEFAULT_MAX_CHUNK_BYTES)
+        val notStarted = MemorySource("c.bin", bytes(10))
+        val id = peers.phone.send(listOf(done, cut, notStarted))
+        val cancelled = MemorySource("d.bin", bytes(10))
+        val cancelledId = peers.phone.send(listOf(cancelled))
+        peers.phone.cancel(cancelledId)
+        peers.desktop.awaitTransfer(id) { it.files[1].status is FileStatus.Transferring }
+
+        peers.phoneChannel.close()
+        cut.gate.complete(Unit)
+
+        val sent = peers.phone.awaitFinished(id)
+        assertEquals(
+            listOf(FileStatus.Done(), FileStatus.Failed(TransferSession.CONNECTION_LOST), FileStatus.Failed(TransferSession.CONNECTION_LOST)),
+            sent.files.map { it.status },
+        )
+        assertEquals(listOf<FileSource>(cut, notStarted), peers.phone.interruptedFiles(id))
+        assertTrue(peers.phone.interruptedFiles(cancelledId).isEmpty(), "cancelled by the user")
+        assertTrue(peers.desktop.interruptedFiles(id).isEmpty(), "only the sender can send again")
+        assertTrue(peers.phone.interruptedFiles("unknown").isEmpty())
     }
 
     @Test

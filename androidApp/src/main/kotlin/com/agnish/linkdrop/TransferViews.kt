@@ -52,8 +52,18 @@ fun OfferCard(pending: PendingOffer) {
     }
 }
 
+/**
+ * One transfer. [onRetry]: shown as Retry (the desktop is connected again and some files were cut
+ * off). [retried]: Retry was used already.
+ */
 @Composable
-fun TransferCard(peerName: String, transfer: TransferProgress, onCancel: (() -> Unit)?) {
+fun TransferCard(
+    peerName: String,
+    transfer: TransferProgress,
+    onCancel: (() -> Unit)?,
+    onRetry: (() -> Unit)? = null,
+    retried: Boolean = false,
+) {
     OutlinedCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -64,6 +74,8 @@ fun TransferCard(peerName: String, transfer: TransferProgress, onCancel: (() -> 
                     modifier = Modifier.weight(1f),
                 )
                 if (!transfer.finished && onCancel != null) TextButton(onClick = onCancel) { Text("Cancel") }
+                if (onRetry != null) Button(onClick = onRetry) { Text("Retry") }
+                if (retried) Text("Retried", style = MaterialTheme.typography.bodySmall)
             }
             transfer.note?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             transfer.files.take(MAX_LISTED_FILES).forEach { FileRow(it) }
