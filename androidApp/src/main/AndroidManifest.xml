@@ -5,7 +5,8 @@
     <!-- Android 17+: needed to connect to devices on the local network. Ignored by older versions. -->
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
 
-    <!-- No backups: pairing keys stored by later slices must never leave the device.
+    <!-- No backups: the list of paired desktops must never leave the device (the identity key
+         itself is in the Android Keystore, which is never backed up).
          Cleartext (ws://) is allowed only by the debug build's network_security_config. -->
     <application
         android:name=".LinkDropApplication"
