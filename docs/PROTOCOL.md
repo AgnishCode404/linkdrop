@@ -200,7 +200,7 @@ sender                                   receiver
 |--------------------|------|
 | `transferOffer`    | `transferId: string` (UUID). `files: [{fileId: int, name: string, size: long, mimeType?: string}]`. `fileId` values are unique within the transfer. |
 | `transferResponse` | `transferId`. `files: [{fileId, accept: bool, resumeOffset: long}]`, one entry per offered file. `resumeOffset` is `0` unless resuming a partial file. Rejecting everything is all `accept:false`. |
-| `fileBegin`        | `transferId`, `fileId`, `offset: long` (equals that file's `resumeOffset`). |
+| `fileBegin`        | `transferId`, `fileId`, `offset: long`: that file's `resumeOffset`, or `0` to start it over (see [Resuming](#resuming)). |
 | `fileEnd`          | `transferId`, `fileId`, `sha256: string` (lowercase hex of the **whole** file, computed while sending). |
 | `fileResult`       | `transferId`, `fileId`, `ok: bool`, `error?: string` (one of the codes below). |
 | `cancel`           | `transferId`, `fileId?`. Either side, at any time. Without `fileId` it cancels the rest of the transfer. |
@@ -220,6 +220,33 @@ Details:
 - The receiver may decline an offer the user has not answered within 120 seconds
   (all `accept:false`).
 
+### Resuming
+
+A file interrupted by a lost connection can continue where it stopped, instead of
+starting over. No extra messages are needed: it uses `resumeOffset` and `offset`.
+
+- **Only between paired devices over TLS.** The receiver keeps the part it received
+  only when the connection is lost mid-file, the sender is paired, and at least one byte
+  arrived. Cancel, a failed checksum, or a plaintext (development) connection delete it,
+  as before.
+- **Kept parts stay hidden and are limited.** At most 16, for at most 7 days; the oldest
+  go first.
+- **Matching.** When the same paired device (same certificate) offers a file with the
+  same cleaned name and the same size, and the user accepts it, the receiver answers
+  `resumeOffset` = the bytes it has (more than 0, less than `size`). Otherwise
+  `resumeOffset` is `0`.
+- **The sender** sends `fileBegin` with `offset` = `resumeOffset`, and binary frames
+  from that byte on. If `resumeOffset` is larger than the file, it sends `offset: 0`
+  and the whole file. Older senders always send `0`.
+- **The receiver** accepts `fileBegin` only with `offset` = the `resumeOffset` it sent,
+  or `0`. With `0` it deletes the kept part and starts over. Any other offset gets
+  `fileResult{ok:false, error:"io_error"}`, and the kept part stays kept.
+- **The checksum still covers the whole file.** The sender reads the part the receiver
+  already has to compute it; the receiver reads back its stored part (stored state is
+  never trusted). If it was a different file with the same name and size, the checksum
+  does not match, and the receiver deletes the whole file. Sending it again then starts
+  from `0`.
+
 ### Binary frames
 
 ```
@@ -231,7 +258,8 @@ Details:
 - Allowed only if both sides listed `"transfer"` in the handshake. Otherwise any binary
   frame gets `error{code:"bad_request"}` and the connection is closed.
 - Allowed only between `fileBegin` and `fileEnd` for that `fileId`.
-- Bytes are appended in order. The position in the file is implied.
+- Bytes are appended in order. The position in the file is implied: it starts at the
+  `fileBegin` `offset`.
 - A frame for any other `fileId`, or a frame larger than the agreed `maxChunkBytes`, is a
   protocol error. The receiver sends `fileResult{ok:false, error:"io_error"}` and drops
   the partial file.

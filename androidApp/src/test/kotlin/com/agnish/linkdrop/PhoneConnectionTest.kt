@@ -15,6 +15,7 @@ import com.agnish.linkdrop.transfer.FileSink
 import com.agnish.linkdrop.transfer.FileSource
 import com.agnish.linkdrop.transfer.FileStatus
 import com.agnish.linkdrop.transfer.FileWriter
+import com.agnish.linkdrop.transfer.PartialFile
 import com.agnish.linkdrop.transfer.OfferDecider
 import com.agnish.linkdrop.transfer.TransferProgress
 import com.agnish.linkdrop.transfer.TransferSession
@@ -238,4 +239,5 @@ private class BytesSink : FileSink {
         override suspend fun abort() = Unit
         override suspend fun keep(peer: String, bytes: Long) = Unit
     }
+    override suspend fun claimPartial(peer: String, name: String, size: Long): PartialFile? = null
 }

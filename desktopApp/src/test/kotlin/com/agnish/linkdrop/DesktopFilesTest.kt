@@ -17,6 +17,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class DesktopFilesTest {
@@ -154,6 +155,102 @@ class DesktopFilesTest {
         writing.write(byteArrayOf(3, 4))
         assertEquals("big.bin", writing.commit())
         assertContentEquals(byteArrayOf(1, 2, 3, 4), root.resolve("big.bin").readBytes())
+    }
+
+    private suspend fun FolderSink.keepPart(name: String, size: Long, data: ByteArray) =
+        create(name, size, null).apply { write(data) }.keep(peer, data.size.toLong())
+
+    private suspend fun readAll(reader: com.agnish.linkdrop.transfer.FileReader): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val buffer = ByteArray(4)
+        while (true) {
+            val n = reader.read(buffer)
+            if (n < 0) break
+            out.write(buffer, 0, n)
+        }
+        reader.close()
+        return out.toByteArray()
+    }
+
+    @Test
+    fun keptPartIsFoundReadAndContinued() = runBlocking {
+        FolderSink(root).keepPart("movie.mkv", 6, byteArrayOf(1, 2, 3))
+
+        val sink = FolderSink(root) // as after a restart
+        val partial = assertNotNull(sink.claimPartial(peer, "movie.mkv", 6))
+        assertEquals(3, partial.bytes)
+        assertContentEquals(byteArrayOf(1, 2, 3), readAll(partial.open()))
+
+        val writer = partial.resume()
+        writer.write(byteArrayOf(4, 5, 6))
+        assertEquals("movie.mkv", writer.commit())
+        assertContentEquals(byteArrayOf(1, 2, 3, 4, 5, 6), root.resolve("movie.mkv").readBytes())
+        assertEquals(listOf("movie.mkv"), names(root), "no hidden files left")
+    }
+
+    @Test
+    fun onlyAMatchingPartIsFound() = runBlocking {
+        val sink = FolderSink(root)
+        sink.keepPart("movie.mkv", 6, byteArrayOf(1, 2, 3))
+        assertNull(sink.claimPartial("b".repeat(64), "movie.mkv", 6), "another device")
+        assertNull(sink.claimPartial(peer, "other.mkv", 6), "another name")
+        assertNull(sink.claimPartial(peer, "movie.mkv", 7), "another size")
+    }
+
+    @Test
+    fun claimedPartIsNotFoundTwiceAndNotCleanedUp(): Unit = runBlocking {
+        val sink = FolderSink(root)
+        sink.keepPart("movie.mkv", 6, byteArrayOf(1, 2, 3))
+        val partial = assertNotNull(sink.claimPartial(peer, "movie.mkv", 6))
+        assertNull(sink.claimPartial(peer, "movie.mkv", 6))
+
+        sink.cleanUpPartials(nowMillis = System.currentTimeMillis() + Partials.MAX_AGE_MILLIS + 60_000)
+        assertContentEquals(byteArrayOf(1, 2, 3), readAll(partial.open()))
+
+        // Released: it can be found again.
+        partial.release()
+        assertNotNull(sink.claimPartial(peer, "movie.mkv", 6))
+    }
+
+    @Test
+    fun discardedPartIsGone() = runBlocking {
+        val sink = FolderSink(root)
+        sink.keepPart("movie.mkv", 6, byteArrayOf(1, 2, 3))
+        assertNotNull(sink.claimPartial(peer, "movie.mkv", 6)).discard()
+        assertTrue(names(root).isEmpty())
+    }
+
+    @Test
+    fun expiredPartIsNotFound() = runBlocking {
+        val sink = FolderSink(root)
+        sink.keepPart("movie.mkv", 6, byteArrayOf(1, 2, 3))
+        val record = root.resolve(names(root).single { it.endsWith(".resume") })
+        val old = assertNotNull(Partials.decode(record.readText())).copy(keptAtMillis = 0)
+        record.writeText(Partials.encode(old))
+        assertNull(sink.claimPartial(peer, "movie.mkv", 6))
+    }
+
+    @Test
+    fun resumedFileThatIsLostAgainIsKeptWithTheNewLength() = runBlocking {
+        FolderSink(root).keepPart("movie.mkv", 6, byteArrayOf(1, 2))
+        val sink = FolderSink(root)
+        val writer = assertNotNull(sink.claimPartial(peer, "movie.mkv", 6)).resume()
+        writer.write(byteArrayOf(3, 4))
+        writer.keep(peer, 4)
+
+        val partial = assertNotNull(FolderSink(root).claimPartial(peer, "movie.mkv", 6))
+        assertEquals(4, partial.bytes)
+        assertContentEquals(byteArrayOf(1, 2, 3, 4), readAll(partial.open()))
+    }
+
+    @Test
+    fun abortedResumeLeavesNothing() = runBlocking {
+        val sink = FolderSink(root)
+        sink.keepPart("movie.mkv", 6, byteArrayOf(1, 2, 3))
+        val writer = assertNotNull(sink.claimPartial(peer, "movie.mkv", 6)).resume()
+        writer.write(byteArrayOf(9))
+        writer.abort()
+        assertTrue(names(root).isEmpty())
     }
 
     @Test

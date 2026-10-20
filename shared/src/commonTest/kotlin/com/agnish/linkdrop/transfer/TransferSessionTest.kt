@@ -321,6 +321,57 @@ class TransferSessionTest {
     }
 
     @Test
+    fun interruptedFileResumesOnTheNextConnection() = runTest {
+        val desktopSink = MemorySink()
+        val data = bytes(300_000)
+        val first = backgroundScope.connect(paired = true, desktopSink = desktopSink)
+        val source = MemorySource("big.bin", data, gateAfterBytes = 2 * DEFAULT_MAX_CHUNK_BYTES)
+        val lost = first.phone.send(listOf(source))
+        awaitWritten(desktopSink, 2L * DEFAULT_MAX_CHUNK_BYTES)
+        first.phoneChannel.close()
+        first.desktop.awaitFinished(lost)
+        source.gate.complete(Unit)
+        val keptBytes = desktopSink.kept.single().bytes
+
+        // The phone connects again and sends the same file.
+        val second = backgroundScope.connect(paired = true, desktopSink = desktopSink)
+        val writtenBefore = desktopSink.written
+        val id = second.phone.send(listOf(MemorySource("big.bin", data)))
+
+        assertEquals(FileStatus.Done("big.bin"), second.desktop.awaitFinished(id).files.single().status)
+        assertEquals(FileStatus.Done(), second.phone.awaitFinished(id).files.single().status)
+        assertContentEquals(data, desktopSink.saved["big.bin"])
+        // Only the rest was sent.
+        assertEquals(data.size - keptBytes, desktopSink.written - writtenBefore)
+        assertTrue(desktopSink.kept.isEmpty())
+    }
+
+    @Test
+    fun differentFileWithTheSameNameAndSizeIsNotSaved() = runTest {
+        val desktopSink = MemorySink()
+        val first = backgroundScope.connect(paired = true, desktopSink = desktopSink)
+        val source = MemorySource("big.bin", bytes(300_000, seed = 1), gateAfterBytes = DEFAULT_MAX_CHUNK_BYTES)
+        val lost = first.phone.send(listOf(source))
+        awaitWritten(desktopSink, DEFAULT_MAX_CHUNK_BYTES.toLong())
+        first.phoneChannel.close()
+        first.desktop.awaitFinished(lost)
+        source.gate.complete(Unit)
+
+        val second = backgroundScope.connect(paired = true, desktopSink = desktopSink)
+        val id = second.phone.send(listOf(MemorySource("big.bin", bytes(300_000, seed = 2))))
+
+        val status = assertIs<FileStatus.Failed>(second.desktop.awaitFinished(id).files.single().status)
+        assertTrue("checksum" in status.reason, status.reason)
+        assertTrue(desktopSink.saved.isEmpty())
+        assertTrue(desktopSink.kept.isEmpty())
+
+        // Sending it again now starts from zero and works.
+        val again = second.phone.send(listOf(MemorySource("big.bin", bytes(300_000, seed = 2))))
+        assertIs<FileStatus.Done>(second.desktop.awaitFinished(again).files.single().status)
+        assertContentEquals(bytes(300_000, seed = 2), desktopSink.saved["big.bin"])
+    }
+
+    @Test
     fun readErrorFailsThatFileAndContinues() = runTest {
         val peers = backgroundScope.connect()
         val broken = MemorySource("broken.bin", bytes(200_000), failAfterBytes = DEFAULT_MAX_CHUNK_BYTES)

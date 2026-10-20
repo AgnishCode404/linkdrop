@@ -14,6 +14,7 @@ import com.agnish.linkdrop.protocol.SESSION_PATH
 import com.agnish.linkdrop.protocol.ServerAddress
 import com.agnish.linkdrop.transfer.FileSink
 import com.agnish.linkdrop.transfer.FileWriter
+import com.agnish.linkdrop.transfer.PartialFile
 import io.ktor.server.application.install
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.connector
@@ -330,4 +331,5 @@ private class FakeDesktop(private val identity: ClientIdentity) {
 private object NoSink : FileSink {
     override fun freeBytes(): Long? = null
     override suspend fun create(name: String, size: Long, mimeType: String?): FileWriter = error("unused")
+    override suspend fun claimPartial(peer: String, name: String, size: Long): PartialFile? = null
 }

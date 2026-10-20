@@ -121,13 +121,17 @@ class MemorySource(
  * [failKeep]: [FileWriter.keep] throws, as when the disk is full.
  */
 class MemorySink(private val free: Long? = null, private val failKeep: Boolean = false) : FileSink {
-    /** One file kept for resuming. */
-    data class Kept(val name: String, val peer: String, val bytes: Long, val data: ByteArray)
+    /** One file kept for resuming. [data] may be changed by a test, as damage on disk would. */
+    data class Kept(val name: String, val peer: String, val bytes: Long, var data: ByteArray, val size: Long) {
+        var claimed = false
+    }
 
     val saved = linkedMapOf<String, ByteArray>()
     val kept = mutableListOf<Kept>()
     private val writing = mutableSetOf<String>()
     var aborted = 0
+        private set
+    var discarded = 0
         private set
 
     /** Bytes written so far, by all files. */
@@ -136,11 +140,15 @@ class MemorySink(private val free: Long? = null, private val failKeep: Boolean =
 
     override fun freeBytes(): Long? = free
 
-    override suspend fun create(name: String, size: Long, mimeType: String?): FileWriter {
+    override suspend fun create(name: String, size: Long, mimeType: String?): FileWriter =
+        writer(name, size, ByteArray(0))
+
+    /** A writer whose file already holds [initial]. */
+    private fun writer(name: String, size: Long, initial: ByteArray): FileWriter {
         val finalName = FileNames.unique(name) { it in saved || it in writing }!!
         writing += finalName
         return object : FileWriter {
-            private val buffer = mutableListOf<Byte>()
+            private val buffer = initial.toMutableList()
 
             override suspend fun write(bytes: ByteArray) {
                 bytes.forEach { buffer += it }
@@ -161,7 +169,31 @@ class MemorySink(private val free: Long? = null, private val failKeep: Boolean =
             override suspend fun keep(peer: String, bytes: Long) {
                 if (failKeep) error("disk full")
                 writing -= finalName
-                kept += Kept(finalName, peer, bytes, buffer.toByteArray())
+                kept += Kept(name, peer, bytes, buffer.toByteArray(), size)
+            }
+        }
+    }
+
+    override suspend fun claimPartial(peer: String, name: String, size: Long): PartialFile? {
+        val match = kept.lastOrNull { !it.claimed && it.peer == peer && it.name == name && it.size == size } ?: return null
+        match.claimed = true
+        return object : PartialFile {
+            override val bytes = match.bytes
+
+            override suspend fun open(): FileReader = MemorySource(name, match.data).open()
+
+            override suspend fun resume(): FileWriter {
+                kept -= match
+                return writer(name, size, match.data)
+            }
+
+            override suspend fun release() {
+                match.claimed = false
+            }
+
+            override suspend fun discard() {
+                kept -= match
+                discarded++
             }
         }
     }

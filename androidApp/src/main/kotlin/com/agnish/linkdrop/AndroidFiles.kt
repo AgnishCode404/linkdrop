@@ -7,6 +7,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.os.ParcelFileDescriptor
 import android.os.StatFs
 import android.provider.MediaStore
 import android.provider.OpenableColumns
@@ -15,6 +16,7 @@ import com.agnish.linkdrop.transfer.FileReader
 import com.agnish.linkdrop.transfer.FileSink
 import com.agnish.linkdrop.transfer.FileSource
 import com.agnish.linkdrop.transfer.FileWriter
+import com.agnish.linkdrop.transfer.PartialFile
 import com.agnish.linkdrop.transfer.PartialRecord
 import com.agnish.linkdrop.transfer.Partials
 import kotlinx.coroutines.Dispatchers
@@ -39,8 +41,11 @@ class MediaStoreSink(context: Context) : FileSink {
     private val resolver: ContentResolver = appContext.contentResolver
     private val recordDir = File(appContext.noBackupFilesDir, "partials")
 
-    /** MediaStore ids of files being written right now; a cleanup never touches them. */
+    /** MediaStore ids of files being written or reserved for resuming; a cleanup never touches them. */
     private val active: MutableSet<Long> = ConcurrentHashMap.newKeySet()
+
+    /** Cleanups and claims run one at a time, so a cleanup never deletes a file just claimed. */
+    private val lock = Any()
 
     override fun freeBytes(): Long? =
         appContext.getExternalFilesDir(null)?.let { runCatching { StatFs(it.path).availableBytes }.getOrNull() }
@@ -75,18 +80,40 @@ class MediaStoreSink(context: Context) : FileSink {
      * record), and kept ones that are expired, damaged or over the limit ([Partials]). Call at startup.
      */
     fun cleanUpPartials(nowMillis: Long = System.currentTimeMillis()) {
-        val files = recordDir.listFiles()?.filter { it.isFile && idOf(it) !in active }.orEmpty()
-        val records = files.filter { it.name.endsWith(RECORD_SUFFIX) }.mapNotNull { file ->
+        synchronized(lock) {
+            val files = idleRecordFiles()
+            val keep = Partials.toKeep(intactRecords(files), nowMillis)
+            files.filter { idOf(it) !in keep }.forEach { it.delete() }
+            ownPendingIds().filter { it !in keep && it !in active }.forEach { id ->
+                runCatching { resolver.delete(uriOf(id), null, null) }
+            }
+        }
+    }
+
+    override suspend fun claimPartial(peer: String, name: String, size: Long): PartialFile? = withContext(Dispatchers.IO) {
+        synchronized(lock) {
+            val records = intactRecords(idleRecordFiles())
+            val usable = Partials.toKeep(records, System.currentTimeMillis())
+            val (id, record) = records.entries
+                .filter { (id, r) -> id in usable && r.peer == peer && r.name == name && r.size == size }
+                .maxByOrNull { it.value.keptAtMillis }
+                ?: return@withContext null
+            active += id
+            KeptPart(id, record)
+        }
+    }
+
+    /** Record files, except those of files in use. */
+    private fun idleRecordFiles(): List<File> =
+        recordDir.listFiles()?.filter { it.isFile && idOf(it) !in active }.orEmpty()
+
+    /** Records (by MediaStore id) whose data is there with the recorded length. */
+    private fun intactRecords(files: List<File>): Map<Long, PartialRecord> =
+        files.filter { it.name.endsWith(RECORD_SUFFIX) }.mapNotNull { file ->
             val id = idOf(file) ?: return@mapNotNull null
             val record = runCatching { Partials.decode(file.readText()) }.getOrNull()
             if (record != null && storedBytes(id) == record.bytes) id to record else null
         }.toMap()
-        val keep = Partials.toKeep(records, nowMillis)
-        files.filter { idOf(it) !in keep }.forEach { it.delete() }
-        ownPendingIds().filter { it !in keep && it !in active }.forEach { id ->
-            runCatching { resolver.delete(uriOf(id), null, null) }
-        }
-    }
 
     /** This app's pending (unfinished) files in Downloads/LinkDrop. */
     private fun ownPendingIds(): List<Long> {
@@ -152,6 +179,42 @@ class MediaStoreSink(context: Context) : FileSink {
         }
     }
 
+    private inner class KeptPart(private val id: Long, private val record: PartialRecord) : PartialFile {
+        private val uri = uriOf(id)
+        override val bytes = record.bytes
+
+        override suspend fun open(): FileReader = withContext(Dispatchers.IO) {
+            StreamReader(resolver.openInputStream(uri) ?: throw IOException("could not open the kept file"))
+        }
+
+        override suspend fun resume(): FileWriter = withContext(Dispatchers.IO) {
+            // The record goes first: if the app crashes from here on, this is an ordinary pending
+            // file, which the next start deletes. It is rewritten if this file is kept again.
+            File(recordDir, "$id$RECORD_SUFFIX").delete()
+            val descriptor = resolver.openFileDescriptor(uri, "rw") ?: throw IOException("could not open the kept file")
+            val out = ParcelFileDescriptor.AutoCloseOutputStream(descriptor)
+            try {
+                out.channel.truncate(bytes)
+                out.channel.position(bytes)
+            } catch (e: Exception) {
+                out.close()
+                throw e
+            }
+            MediaStoreWriter(id, uri, record.name, record.size, out.buffered(256 * 1024))
+        }
+
+        override suspend fun release() {
+            active -= id
+        }
+
+        override suspend fun discard() = withContext(Dispatchers.IO) {
+            File(recordDir, "$id$RECORD_SUFFIX").delete()
+            runCatching { resolver.delete(uri, null, null) }
+            active -= id
+            Unit
+        }
+    }
+
     private companion object {
         val RELATIVE_PATH = "${Environment.DIRECTORY_DOWNLOADS}/LinkDrop"
         const val RECORD_SUFFIX = ".resume"
@@ -180,12 +243,6 @@ class UriSource private constructor(
     override suspend fun open(): FileReader = withContext(Dispatchers.IO) {
         val input = resolver.openInputStream(uri) ?: throw IOException("could not open $name")
         StreamReader(input)
-    }
-
-    private class StreamReader(private val input: InputStream) : FileReader {
-        override suspend fun read(buffer: ByteArray): Int = withContext(Dispatchers.IO) { input.read(buffer) }
-
-        override fun close() = input.close()
     }
 
     companion object {
@@ -222,6 +279,12 @@ class UriSource private constructor(
             }
         }
     }
+}
+
+private class StreamReader(private val input: InputStream) : FileReader {
+    override suspend fun read(buffer: ByteArray): Int = withContext(Dispatchers.IO) { input.read(buffer) }
+
+    override fun close() = input.close()
 }
 
 private fun displayName(resolver: ContentResolver, uri: Uri): String? =

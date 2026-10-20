@@ -219,6 +219,9 @@ class TransferSession(
         var offerMessageId: String? = null
         val replies = Channel<Reply>(Channel.UNLIMITED)
         val skipped = mutableSetOf<Int>()
+
+        /** Where the receiver asked to resume each file (its `resumeOffset`), if not at 0. */
+        val resumeAt = mutableMapOf<Int, Long>()
     }
 
     private sealed interface Reply {
@@ -265,7 +268,11 @@ class TransferSession(
                     return
                 }
                 is Reply.Peer -> when (val message = reply.message) {
-                    is TransferResponse -> accepted = message.files.filter { it.accept }.map { it.fileId }.toSet()
+                    is TransferResponse -> {
+                        accepted = message.files.filter { it.accept }.map { it.fileId }.toSet()
+                        message.files.filter { it.accept && it.resumeOffset > 0 }
+                            .forEach { transfer.resumeAt[it.fileId] = it.resumeOffset }
+                    }
                     is ErrorMessage -> {
                         markRemaining(id, FileStatus.Declined, note = "refused: ${message.code}")
                         return
@@ -285,7 +292,7 @@ class TransferSession(
             when {
                 fileId !in accepted -> setStatus(id, fileId, FileStatus.Declined)
                 fileId in transfer.skipped -> setStatus(id, fileId, FileStatus.Cancelled)
-                sendFile(transfer, fileId, file) == Next.StopTransfer -> {
+                sendFile(transfer, fileId, file, resumeOffset(transfer, fileId, file)) == Next.StopTransfer -> {
                     markRemaining(id, FileStatus.Cancelled)
                     return
                 }
@@ -294,7 +301,14 @@ class TransferSession(
         sendMessage(TransferDone(id))
     }
 
-    private suspend fun sendFile(transfer: Outgoing, fileId: Int, file: FileSource): Next {
+    /**
+     * Where to start [file]: the receiver's `resumeOffset`, or 0 if it asked for none or for more
+     * than the whole file (then the receiver starts the file over; PROTOCOL.md, "Resuming").
+     */
+    private fun resumeOffset(transfer: Outgoing, fileId: Int, file: FileSource): Long =
+        transfer.resumeAt[fileId]?.takeIf { it <= file.size } ?: 0
+
+    private suspend fun sendFile(transfer: Outgoing, fileId: Int, file: FileSource, offset: Long): Next {
         val id = transfer.transferId
         val reader = try {
             file.open()
@@ -306,25 +320,30 @@ class TransferSession(
         }
         val sha = newSha256()
         var sent = 0L
-        sendMessage(FileBegin(id, fileId, 0))
-        setStatus(id, fileId, FileStatus.Transferring(0))
         try {
             val buffer = ByteArray(sendChunkBytes)
+            if (offset > 0) {
+                log("Resuming \"${file.name}\" after $offset bytes")
+                setStatus(id, fileId, FileStatus.Transferring(offset))
+                // The checksum covers the whole file, so the part the receiver already has is read too.
+                while (sent < offset) {
+                    transfer.replies.tryReceive().getOrNull()?.let { reply ->
+                        handleReplyWhileSending(transfer, fileId, reply)?.let { return it }
+                    }
+                    val n = readOrCancel(id, fileId, reader, buffer, max = offset - sent) ?: return Next.NextFile
+                    if (n < 0) return abandonChangedFile(id, fileId)
+                    sha.update(buffer, 0, n)
+                    sent += n
+                }
+            }
+            sendMessage(FileBegin(id, fileId, offset))
+            setStatus(id, fileId, FileStatus.Transferring(offset))
             while (true) {
                 // The receiver may have failed or cancelled this file while we were sending.
                 transfer.replies.tryReceive().getOrNull()?.let { reply ->
                     handleReplyWhileSending(transfer, fileId, reply)?.let { return it }
                 }
-                val n = try {
-                    reader.read(buffer)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    // Tell the receiver, so it does not wait for the rest of this file.
-                    sendMessage(Cancel(id, fileId))
-                    setStatus(id, fileId, FileStatus.Failed("could not read: ${describe(e)}"))
-                    return Next.NextFile
-                }
+                val n = readOrCancel(id, fileId, reader, buffer) ?: return Next.NextFile
                 if (n < 0) break
                 if (n == 0) continue
                 if (sent + n > file.size) return abandonChangedFile(id, fileId)
@@ -343,6 +362,32 @@ class TransferSession(
             val reply = transfer.replies.receive()
             handleReplyWhileSending(transfer, fileId, reply)?.let { return it }
         }
+    }
+
+    /**
+     * Reads up to [max] bytes into the start of [buffer]: the count, or -1 at the end. On a read
+     * error, tells the receiver (so it does not wait for the rest of this file), fails the file and
+     * returns null.
+     */
+    private suspend fun readOrCancel(
+        transferId: String,
+        fileId: Int,
+        reader: FileReader,
+        buffer: ByteArray,
+        max: Long = buffer.size.toLong(),
+    ): Int? = try {
+        if (max >= buffer.size) {
+            reader.read(buffer)
+        } else {
+            val part = ByteArray(max.toInt())
+            reader.read(part).also { n -> if (n > 0) part.copyInto(buffer, 0, 0, n) }
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        sendMessage(Cancel(transferId, fileId))
+        setStatus(transferId, fileId, FileStatus.Failed("could not read: ${describe(e)}"))
+        null
     }
 
     /** Returns what to do next, or null to keep going with the current file. */
@@ -394,7 +439,10 @@ class TransferSession(
 
     // ---- Receiver: offers ----
 
-    private class Accepted(val name: String, val size: Long, val mimeType: String?)
+    private class Accepted(val name: String, val size: Long, val mimeType: String?) {
+        /** A kept partial file reserved for resuming this one, until its fileBegin. */
+        var partial: PartialFile? = null
+    }
 
     private class Incoming(val transferId: String, val accepted: MutableMap<Int, Accepted>) {
         val finished = mutableSetOf<Int>()
@@ -405,10 +453,10 @@ class TransferSession(
         val fileId: Int,
         val size: Long,
         val writer: FileWriter,
-    ) {
-        val sha = newSha256()
-        var received = 0L
-    }
+        /** When resuming: already fed with the stored part, and [received] starts at its length. */
+        val sha: Sha256 = newSha256(),
+        var received: Long = 0,
+    )
 
     private suspend fun onOffer(id: String, offer: TransferOffer) {
         val problem = validate(offer)
@@ -474,15 +522,49 @@ class TransferSession(
                 markRemaining(id, FileStatus.Cancelled)
                 continue
             }
-            sendMessage(TransferResponse(id, offer.files.map { FileDecision(it.fileId, accept && names[it.fileId] != null) }))
-            if (accept) {
-                val accepted = acceptable.associate { it.fileId to Accepted(names.getValue(it.fileId)!!, it.size, it.mimeType) }
-                incomingById[id] = Incoming(id, accepted.toMutableMap())
-            } else {
+            if (!accept) {
+                sendMessage(TransferResponse(id, offer.files.map { FileDecision(it.fileId, accept = false) }))
                 markRemaining(id, FileStatus.Declined, note)
+                continue
+            }
+            val accepted = acceptable.associate { it.fileId to Accepted(names.getValue(it.fileId)!!, it.size, it.mimeType) }
+            // Registered first, so the reserved partial files are released if the connection ends now.
+            incomingById[id] = Incoming(id, accepted.toMutableMap())
+            claimPartials(accepted.values)
+            sendMessage(
+                TransferResponse(id, offer.files.map { file ->
+                    val info = accepted[file.fileId]
+                    FileDecision(file.fileId, accept = info != null, resumeOffset = info?.partial?.bytes ?: 0)
+                }),
+            )
+        }
+    }
+
+    /** Reserves a kept partial file for each accepted file that has one (paired peers only). */
+    private suspend fun claimPartials(files: Collection<Accepted>) {
+        val peer = peerKey ?: return
+        val sink = sink ?: return
+        for (file in files) {
+            if (file.size == 0L) continue
+            file.partial = try {
+                sink.claimPartial(peer, file.name, file.size)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log("Could not look for a partial \"${file.name}\": ${describe(e)}")
+                null
             }
         }
     }
+
+    /** Gives back a reserved partial file that was not resumed; it stays kept for a later try. */
+    private suspend fun releasePartial(file: Accepted) {
+        val partial = file.partial ?: return
+        file.partial = null
+        runCatching { partial.release() }
+    }
+
+    private suspend fun releasePartials(transfer: Incoming) = transfer.accepted.values.forEach { releasePartial(it) }
 
     // ---- Receiver: file data ----
 
@@ -491,32 +573,77 @@ class TransferSession(
         discarding = false
         val transfer = incomingById[begin.transferId]
         val info = transfer?.accepted?.get(begin.fileId)
+        val partial = info?.partial
         val error = when {
             transfer == null -> TransferErrors.UNKNOWN_TRANSFER
             info == null -> TransferErrors.REJECTED
-            begin.fileId in transfer.finished || begin.offset != 0L -> TransferErrors.IO_ERROR
+            begin.fileId in transfer.finished -> TransferErrors.IO_ERROR
+            // Only where this side asked to resume, or from the start (PROTOCOL.md, "Resuming").
+            begin.offset != 0L && begin.offset != partial?.bytes -> TransferErrors.IO_ERROR
             else -> null
         }
         if (error != null) {
+            info?.let { releasePartial(it) }
             sendMessage(FileResult(begin.transferId, begin.fileId, ok = false, error = error))
             discarding = true
             return
         }
         transfer!!
         info!!
-        val writer = try {
-            sink!!.create(info.name, info.size, info.mimeType)
+        info.partial = null
+        val file = try {
+            if (partial != null && begin.offset == partial.bytes) {
+                resume(partial, transfer, begin.fileId, info.size)
+            } else {
+                // The sender started over: the kept part is not needed any more.
+                partial?.let { runCatching { it.discard() } }
+                OpenFile(transfer, begin.fileId, info.size, sink!!.create(info.name, info.size, info.mimeType))
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             transfer.finished += begin.fileId
-            setStatus(transfer.transferId, begin.fileId, FileStatus.Failed("could not create file: ${describe(e)}"))
+            val what = if (begin.offset > 0) "could not resume the file" else "could not create file"
+            setStatus(transfer.transferId, begin.fileId, FileStatus.Failed("$what: ${describe(e)}"))
             sendMessage(FileResult(begin.transferId, begin.fileId, ok = false, error = TransferErrors.IO_ERROR))
             discarding = true
             return
         }
-        open = OpenFile(transfer, begin.fileId, info.size, writer)
-        setStatus(transfer.transferId, begin.fileId, FileStatus.Transferring(0))
+        open = file
+        setStatus(transfer.transferId, begin.fileId, FileStatus.Transferring(file.received))
+    }
+
+    /**
+     * Continues a kept partial file. Its stored data is read back for the checksum (stored state is
+     * never trusted); if that fails, the partial file is deleted.
+     */
+    private suspend fun resume(partial: PartialFile, transfer: Incoming, fileId: Int, size: Long): OpenFile {
+        try {
+            val sha = newSha256()
+            var stored = 0L
+            val reader = partial.open()
+            try {
+                val buffer = ByteArray(RESUME_READ_BYTES)
+                while (true) {
+                    val n = reader.read(buffer)
+                    if (n < 0) break
+                    sha.update(buffer, 0, n)
+                    stored += n
+                }
+            } finally {
+                reader.close()
+            }
+            check(stored == partial.bytes) { "the kept part changed on disk" }
+            log("Resuming a file from \"$peerName\" after $stored bytes")
+            return OpenFile(transfer, fileId, size, partial.resume(), sha, stored)
+        } catch (e: CancellationException) {
+            // The connection ended meanwhile: nothing is wrong with the kept part.
+            withContext(NonCancellable) { runCatching { partial.release() } }
+            throw e
+        } catch (e: Exception) {
+            withContext(NonCancellable) { runCatching { partial.discard() } }
+            throw e
+        }
     }
 
     private suspend fun onChunk(frame: ByteArray) {
@@ -571,6 +698,7 @@ class TransferSession(
 
     private suspend fun onTransferDone(done: TransferDone) {
         val transfer = incomingById.remove(done.transferId) ?: return
+        releasePartials(transfer)
         open?.takeIf { it.transfer === transfer }?.let { fail(it, TransferErrors.IO_ERROR, "transfer ended mid-file") }
         markRemaining(done.transferId, FileStatus.Failed("the sender skipped this file"))
         log("Transfer from \"$peerName\" finished")
@@ -596,10 +724,12 @@ class TransferSession(
             runCatching { current.writer.abort() }
         }
         if (fileId == null) {
+            releasePartials(transfer)
             incomingById.remove(transferId)
             markRemaining(transferId, FileStatus.Cancelled)
             if (!byPeer) sendMessage(Cancel(transferId))
         } else {
+            transfer.accepted[fileId]?.let { releasePartial(it) }
             transfer.accepted.remove(fileId)
             transfer.finished += fileId
             setStatus(transferId, fileId, FileStatus.Cancelled)
@@ -633,6 +763,7 @@ class TransferSession(
     private suspend fun endAll() {
         open?.let { file -> keepOrAbort(file) }
         open = null
+        incomingById.values.forEach { releasePartials(it) }
         _transfers.update { list ->
             list.map { t ->
                 if (t.finished) t else t.copy(files = t.files.map { f ->
@@ -715,6 +846,9 @@ class TransferSession(
         const val CONNECTION_LOST_KEPT = "connection lost; the part received so far is kept"
 
         private const val CLOSE_POLICY_VIOLATION = 1008
+
+        /** Read size when re-reading a kept part for its checksum. */
+        private const val RESUME_READ_BYTES = 256 * 1024
         private val PROGRESS_INTERVAL = 100.milliseconds
 
         /** Whether both sides can transfer files. */

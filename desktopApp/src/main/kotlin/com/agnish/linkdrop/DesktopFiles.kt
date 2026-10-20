@@ -5,12 +5,15 @@ import com.agnish.linkdrop.transfer.FileReader
 import com.agnish.linkdrop.transfer.FileSink
 import com.agnish.linkdrop.transfer.FileSource
 import com.agnish.linkdrop.transfer.FileWriter
+import com.agnish.linkdrop.transfer.PartialFile
 import com.agnish.linkdrop.transfer.PartialRecord
 import com.agnish.linkdrop.transfer.Partials
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.io.OutputStream
+import java.nio.channels.Channels
+import java.nio.channels.FileChannel
 import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
 import java.nio.file.LinkOption
@@ -55,27 +58,56 @@ object DesktopFiles {
  */
 class FolderSink(private val dir: Path) : FileSink {
 
-    /** Keys of files being written right now (by any connection); a cleanup never touches them. */
+    /**
+     * Keys of files being written or reserved for resuming right now (by any connection); a
+     * cleanup never touches them.
+     */
     private val active: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    /** Cleanups and claims run one at a time, so a cleanup never deletes a file just claimed. */
+    private val lock = Any()
 
     /**
      * Deletes what must not stay: partial files left by a crash or power cut (no record), and kept
      * ones that are expired, damaged or over the limit ([Partials]). Call at startup.
      */
     fun cleanUpPartials(nowMillis: Long = System.currentTimeMillis()) {
-        if (!Files.isDirectory(dir)) return
-        val ours = Files.newDirectoryStream(dir, "$PREFIX*").use { entries ->
-            entries.filter { Files.isRegularFile(it, LinkOption.NOFOLLOW_LINKS) && keyOf(it) !in active }
+        synchronized(lock) {
+            if (!Files.isDirectory(dir)) return
+            val ours = ourIdleFiles()
+            val keep = Partials.toKeep(intactRecords(ours), nowMillis)
+            ours.filterNot { keyOf(it) in keep }.forEach { runCatching { Files.deleteIfExists(it) } }
         }
+    }
+
+    override suspend fun claimPartial(peer: String, name: String, size: Long): PartialFile? = withContext(Dispatchers.IO) {
+        synchronized(lock) {
+            if (!Files.isDirectory(dir)) return@withContext null
+            val records = intactRecords(ourIdleFiles())
+            val usable = Partials.toKeep(records, System.currentTimeMillis())
+            val (key, record) = records.entries
+                .filter { (key, r) -> key in usable && r.peer == peer && r.name == name && r.size == size }
+                .maxByOrNull { it.value.keptAtMillis }
+                ?: return@withContext null
+            active += key
+            KeptPart(key, record)
+        }
+    }
+
+    /** This sink's hidden files, except those in use. */
+    private fun ourIdleFiles(): List<Path> = Files.newDirectoryStream(dir, "$PREFIX*").use { entries ->
+        entries.filter { Files.isRegularFile(it, LinkOption.NOFOLLOW_LINKS) && keyOf(it) !in active }
+    }
+
+    /** Records (by key) whose data is there with the recorded length. */
+    private fun intactRecords(ours: List<Path>): Map<String, PartialRecord> {
         val parts = ours.filter { it.name.endsWith(PART_SUFFIX) }.associateBy { keyOf(it) }
-        val records = ours.filter { it.name.endsWith(RECORD_SUFFIX) }.mapNotNull { file ->
+        return ours.filter { it.name.endsWith(RECORD_SUFFIX) }.mapNotNull { file ->
             val record = runCatching { Partials.decode(Files.readString(file)) }.getOrNull()
             val part = parts[keyOf(file)]
             val intact = record != null && part != null && runCatching { Files.size(part) }.getOrNull() == record.bytes
             if (intact) keyOf(file) to record else null
         }.toMap()
-        val keep = Partials.toKeep(records, nowMillis)
-        ours.filterNot { keyOf(it) in keep }.forEach { runCatching { Files.deleteIfExists(it) } }
     }
 
     override fun freeBytes(): Long? = runCatching {
@@ -150,6 +182,40 @@ class FolderSink(private val dir: Path) : FileSink {
         }
     }
 
+    private inner class KeptPart(private val key: String, private val record: PartialRecord) : PartialFile {
+        private val part = dir.resolve("$key$PART_SUFFIX")
+        override val bytes = record.bytes
+
+        override suspend fun open(): FileReader = withContext(Dispatchers.IO) { readerOf(part) }
+
+        override suspend fun resume(): FileWriter = withContext(Dispatchers.IO) {
+            // The record goes first: if the app crashes from here on, this is an ordinary unfinished
+            // file, which the next start deletes. Losing the record again is fine; it is rewritten
+            // if this file is kept again.
+            Files.deleteIfExists(dir.resolve("$key$RECORD_SUFFIX"))
+            val channel = FileChannel.open(part, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)
+            try {
+                channel.truncate(bytes)
+                channel.position(bytes)
+            } catch (e: Exception) {
+                channel.close()
+                throw e
+            }
+            PartFileWriter(record.name, record.size, key, Channels.newOutputStream(channel).buffered(256 * 1024))
+        }
+
+        override suspend fun release() {
+            active -= key
+        }
+
+        override suspend fun discard() = withContext(Dispatchers.IO) {
+            runCatching { Files.deleteIfExists(dir.resolve("$key$RECORD_SUFFIX")) }
+            runCatching { Files.deleteIfExists(part) }
+            active -= key
+            Unit
+        }
+    }
+
     private companion object {
         const val PREFIX = ".linkdrop-"
         const val PART_SUFFIX = ".part"
@@ -167,12 +233,14 @@ class PathSource(private val path: Path) : FileSource {
     override val size: Long = Files.size(path)
     override val mimeType: String? = runCatching { Files.probeContentType(path) }.getOrNull()
 
-    override suspend fun open(): FileReader = withContext(Dispatchers.IO) {
-        val input = Files.newInputStream(path)
-        object : FileReader {
-            override suspend fun read(buffer: ByteArray): Int = withContext(Dispatchers.IO) { input.read(buffer) }
+    override suspend fun open(): FileReader = withContext(Dispatchers.IO) { readerOf(path) }
+}
 
-            override fun close() = input.close()
-        }
+private fun readerOf(path: Path): FileReader {
+    val input = Files.newInputStream(path)
+    return object : FileReader {
+        override suspend fun read(buffer: ByteArray): Int = withContext(Dispatchers.IO) { input.read(buffer) }
+
+        override fun close() = input.close()
     }
 }
