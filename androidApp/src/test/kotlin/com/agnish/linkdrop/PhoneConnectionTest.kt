@@ -105,6 +105,17 @@ class PhoneConnectionTest {
         scope.launch { connection.offers.collect { offers -> offers.forEach { it.answer.complete(true) } } }
     }
 
+    @Test
+    fun aConnectionAttemptStartsTheServiceOnce() = runBlocking {
+        var started = 0
+        val connection = PhoneConnection(phone, phoneSink, scope, allowPlaintext = true, tls = null, paired = null, onConnectionStarted = { started++ })
+        // Nothing listens on port 9 here: the attempt fails after starting.
+        connection.connect(ServerAddress("127.0.0.1", 9))
+        connection.connect(ServerAddress("127.0.0.1", 9)) // ignored while the first attempt runs
+        connection.awaitState { it is PhoneConnection.State.Disconnected }
+        assertEquals(1, started)
+    }
+
     private suspend fun PhoneConnection.awaitState(test: (PhoneConnection.State) -> Boolean) =
         withTimeout(30.seconds) { state.first(test) }
 

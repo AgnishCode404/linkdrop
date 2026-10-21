@@ -4,6 +4,15 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Android 17+: needed to connect to devices on the local network. Ignored by older versions. -->
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+    <!-- ConnectionService: keeps the connection to a desktop alive with the screen off or the app
+         in the background, only while connected. All three are granted at install. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Its Wi-Fi lock, and a CPU wake lock held only while files are being transferred. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Android 13+: showing that notification. Asked for at runtime; LinkDrop works without it
+         (the service then only appears in the system's list of active apps). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- No backups: the list of paired desktops must never leave the device (the identity key
          itself is in the Android Keystore, which is never backed up).
@@ -36,6 +45,12 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
+
+        <!-- Not exported: only LinkDrop itself can start or stop it. -->
+        <service
+            android:name=".ConnectionService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 
 </manifest>

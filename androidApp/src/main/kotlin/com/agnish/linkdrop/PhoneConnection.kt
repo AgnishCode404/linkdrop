@@ -53,6 +53,11 @@ class PhoneConnection(
     private val tls: PhoneTls?,
     val paired: PairedDesktops?,
     private val okHttp: OkHttpClient = HelloClient.okHttp,
+    /**
+     * Called on the caller's thread when a connection attempt starts (the user just tapped, so
+     * LinkDrop is in front): starts the connection service, which Android forbids from the background.
+     */
+    private val onConnectionStarted: () -> Unit = {},
 ) {
     sealed interface State {
         /** [reason] is null when the user disconnected (or never connected). */
@@ -136,6 +141,7 @@ class PhoneConnection(
         if (_state.value !is State.Disconnected) return
         userDisconnected = false
         _state.value = State.Connecting(address)
+        onConnectionStarted()
         val pin = desktopId?.let { paired?.byDeviceId(it)?.certSha256 }
         val transport = TransportConfig.choose(allowPlaintext, pin)
         job = scope.launch {

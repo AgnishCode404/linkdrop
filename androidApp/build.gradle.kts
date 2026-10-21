@@ -42,6 +42,8 @@ dependencies {
     implementation(libs.compose.ui)
 
     implementation(libs.okhttp)
+    // Dispatchers.Main for the connection service (it was only there through other libraries).
+    implementation(libs.kotlinx.coroutinesAndroid)
 
     // JVM unit tests: HelloClient against a local fake WebSocket server.
     testImplementation(libs.kotlin.testJunit)

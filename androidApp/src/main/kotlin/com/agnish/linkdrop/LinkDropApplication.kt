@@ -25,6 +25,8 @@ class LinkDropApplication : Application() {
             // The Keystore identity is created on first use (in the background, when connecting).
             tls = PhoneTls(identity = { PhoneIdentity.loadOrCreate() }, exporter = AndroidKeyingMaterialExporter),
             paired = PairedDesktops.fromPreferences(this),
+            // Keeps the connection alive with the screen off or the app in the background.
+            onConnectionStarted = { ConnectionService.start(this) },
         )
     }
 }
