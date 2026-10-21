@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">linkdrop</string>
+    <string name="app_name">LinkDrop</string>
     <string name="share_label">Send to desktop</string>
     <string name="notification_channel_connection">Connection</string>
     <string name="notification_channel_connection_description">Shown while LinkDrop is connected to a desktop</string>
