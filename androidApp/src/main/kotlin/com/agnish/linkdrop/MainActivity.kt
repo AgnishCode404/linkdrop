@@ -257,6 +257,19 @@ fun PhoneScreen(
                 when (val s = state) {
                     is PhoneConnection.State.Disconnected -> {
                         s.reason?.let { StatusLine("Not connected: $it", Tone.Error) }
+                        // The connection to a paired desktop dropped: one tap brings it back.
+                        val lastId = remember(s) { AndroidDevice.lastDesktopId(context) }
+                        PhoneConnection.reconnectTarget(s, lastId, pairedDesktops)?.let { target ->
+                            val lastUsed = remember(s) { AndroidDevice.lastAddress(context) }
+                            val reconnectTo = PhoneConnection.reconnectAddress(target, desktops, lastUsed)
+                            PrimaryButton(
+                                "Reconnect to \"${target.name}\"",
+                                onClick = { requestConnect(reconnectTo, target.deviceId) },
+                                enabled = reconnectTo != null,
+                                modifier = Modifier.fillMaxWidth(),
+                                large = true,
+                            )
+                        }
                         DesktopList(
                             desktops = desktops,
                             lastDesktopId = lastDesktopId,

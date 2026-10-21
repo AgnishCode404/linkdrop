@@ -1,5 +1,6 @@
 package com.agnish.linkdrop
 
+import com.agnish.linkdrop.protocol.DiscoveredDesktop
 import com.agnish.linkdrop.protocol.LocalDevice
 import com.agnish.linkdrop.protocol.PairedDevice
 import com.agnish.linkdrop.protocol.ServerAddress
@@ -240,5 +241,25 @@ class PhoneConnection(
         channel?.close(1000, "bye")
         job?.cancel()
         if (_state.value !is State.Connected) _state.value = State.Disconnected(reason)
+    }
+
+    companion object {
+        /**
+         * The desktop to offer "Reconnect" for: the last one used, when the connection to it ended
+         * without the user's Disconnect (it dropped, or Android's limit), and only if it is paired.
+         * A paired desktop's certificate is pinned, so reconnecting cannot reach an impostor, even
+         * at a new address. Null when there is nothing to offer.
+         */
+        fun reconnectTarget(state: State, lastDesktopId: String?, paired: List<PairedDevice>): PairedDevice? {
+            if (state !is State.Disconnected || state.reason == null || lastDesktopId == null) return null
+            return paired.firstOrNull { it.deviceId == lastDesktopId }
+        }
+
+        /**
+         * Where to reconnect to [target]: where discovery sees it now (its address may have changed),
+         * else the last address used. Null if neither is known.
+         */
+        fun reconnectAddress(target: PairedDevice, discovered: List<DiscoveredDesktop>, lastAddress: String): ServerAddress? =
+            discovered.firstOrNull { it.deviceId == target.deviceId }?.address ?: ServerAddress.parse(lastAddress)
     }
 }
