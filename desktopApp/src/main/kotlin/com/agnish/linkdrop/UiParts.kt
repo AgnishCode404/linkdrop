@@ -32,27 +32,42 @@ import androidx.compose.ui.unit.dp
 /** Minimum height of every button (easy to hit with a mouse). */
 val BUTTON_HEIGHT: Dp = 40.dp
 
-/** The main action of a screen or card: filled with the accent color. */
+/** Height of the large buttons of pairing and connection requests (Allow / Decline). */
+val LARGE_BUTTON_HEIGHT: Dp = 56.dp
+
+/** The main action of a screen or card: filled with the accent color. [large]: for pairing. */
 @Composable
-fun PrimaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
-    Button(onClick = onClick, enabled = enabled, modifier = modifier.heightIn(min = BUTTON_HEIGHT)) {
-        Text(text, style = MaterialTheme.typography.labelLarge)
+fun PrimaryButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    large: Boolean = false,
+) {
+    Button(onClick = onClick, enabled = enabled, modifier = modifier.heightIn(min = buttonHeight(large))) {
+        Text(text, style = buttonTextStyle(large))
     }
 }
 
-/** Cancel, Decline, Disconnect: red outline, never filled. */
+/** Cancel, Decline, Disconnect, Forget: red outline, never filled. [large]: for pairing. */
 @Composable
-fun DangerButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun DangerButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, large: Boolean = false) {
     val red = MaterialTheme.colorScheme.error
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier.heightIn(min = BUTTON_HEIGHT),
+        modifier = modifier.heightIn(min = buttonHeight(large)),
         colors = ButtonDefaults.outlinedButtonColors(contentColor = red),
         border = BorderStroke(1.dp, red),
     ) {
-        Text(text, style = MaterialTheme.typography.labelLarge)
+        Text(text, style = buttonTextStyle(large))
     }
 }
+
+private fun buttonHeight(large: Boolean): Dp = if (large) LARGE_BUTTON_HEIGHT else BUTTON_HEIGHT
+
+@Composable
+private fun buttonTextStyle(large: Boolean) =
+    if (large) MaterialTheme.typography.titleMedium else MaterialTheme.typography.labelLarge
 
 /** What a [StatusLine] says about the state: its dot and text color. */
 enum class Tone { Neutral, Active, Good, Warning, Error }

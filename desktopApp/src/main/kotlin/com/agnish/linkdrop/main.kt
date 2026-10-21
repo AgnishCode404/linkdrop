@@ -1,7 +1,9 @@
 package com.agnish.linkdrop
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
@@ -253,7 +256,7 @@ fun DesktopScreen(
                 }
 
                 HorizontalDivider()
-                Text("Log", style = MaterialTheme.typography.titleMedium)
+                SectionTitle("Log")
                 LogView(log)
             }
         }
@@ -267,10 +270,30 @@ private fun LogView(log: EventLog) {
     LaunchedEffect(entries.size) {
         if (entries.isNotEmpty()) listState.animateScrollToItem(entries.lastIndex)
     }
-    SelectionContainer {
-        // Fixed height: a scrolling list cannot sit inside the scrolling page without one.
-        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().height(180.dp)) {
-            items(entries) { Text(it, fontFamily = FontFamily.Monospace) }
+    // On the page background, a step darker than the cards, in a smaller monospace font.
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        SelectionContainer {
+            // Fixed height: a scrolling list cannot sit inside the scrolling page without one.
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxWidth().height(180.dp),
+                contentPadding = PaddingValues(12.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                items(entries) {
+                    Text(
+                        it,
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
     }
 }

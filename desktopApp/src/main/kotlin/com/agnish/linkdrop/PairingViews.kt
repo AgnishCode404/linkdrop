@@ -10,13 +10,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -65,73 +61,74 @@ fun ConnectionRequestContent(request: ConnectionRequest) {
                         "\"${request.deviceName}\" wants to connect to your device",
                         style = MaterialTheme.typography.titleLarge,
                     )
-                    Text("From ${request.address}", style = MaterialTheme.typography.bodyMedium)
+                    Text("From ${request.address}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     val code = request.code
                     if (code != null) {
-                        Text("Pairing code", style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            "Pairing code",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                         Text(
                             Pairing.formatCode(code),
                             style = MaterialTheme.typography.displaySmall,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
                         )
                         Text("Allow only if the phone shows the same code. Once allowed, it can connect without asking.")
                     } else {
-                        Text(
+                        WarningBanner(
                             "Development build: this connection is NOT encrypted and cannot be verified. " +
                                 "It is not remembered.",
-                            color = MaterialTheme.colorScheme.error,
                         )
                     }
                     Text(
                         "Declined automatically in ${Pairing.CONFIRM_TIMEOUT_SECONDS / 60} minutes.",
                         style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 Spacer(Modifier.height(16.dp))
                 // Large, equal-width buttons that are easy to hit; Decline on the left, Allow on the right.
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxWidth()) {
-                    OutlinedButton(
-                        onClick = { request.decline() },
-                        modifier = Modifier.weight(1f).height(DIALOG_BUTTON_HEIGHT),
-                    ) {
-                        Text("Decline", style = MaterialTheme.typography.titleMedium)
-                    }
-                    Button(
-                        onClick = { request.allow() },
-                        modifier = Modifier.weight(1f).height(DIALOG_BUTTON_HEIGHT),
-                    ) {
-                        Text("Allow", style = MaterialTheme.typography.titleMedium)
-                    }
+                    DangerButton("Decline", onClick = { request.decline() }, modifier = Modifier.weight(1f), large = true)
+                    PrimaryButton("Allow", onClick = { request.allow() }, modifier = Modifier.weight(1f), large = true)
                 }
             }
         }
     }
 }
 
-private val DIALOG_BUTTON_HEIGHT = 56.dp
-
 /** "Paired phones": they connect without asking. Forget makes the next connection ask again. */
 @Composable
 fun PairedPhonesList(pairedPhones: PairedPhones) {
     val devices by pairedPhones.devices.collectAsState()
-    Text("Paired phones", style = MaterialTheme.typography.titleMedium)
+    SectionTitle("Paired phones")
     if (devices.isEmpty()) {
-        Text("None yet. A phone is paired the first time you allow it to connect.")
+        Text(
+            "None yet. A phone is paired the first time you allow it to connect.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         return
     }
     devices.forEach { device ->
-        OutlinedCard(modifier = Modifier.fillMaxWidth()) {
-            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
+        AppCard(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("\"${device.name}\"", maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
                         Fingerprints.short(device.certSha256),
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                TextButton(onClick = { pairedPhones.forget(device.certSha256) }) { Text("Forget") }
+                DangerButton("Forget", onClick = { pairedPhones.forget(device.certSha256) })
             }
         }
     }

@@ -4,14 +4,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.ElevatedCard
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -27,20 +25,23 @@ import com.agnish.linkdrop.protocol.Pairing
 /** Step 1 of pairing on the phone: compare the code with the desktop's screen. */
 @Composable
 fun PairingCodeCard(state: PhoneConnection.State.ConfirmPairing) {
-    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Pairing with a new desktop", style = MaterialTheme.typography.titleMedium)
-            Text(state.address.host, style = MaterialTheme.typography.bodySmall)
+    AppCard(modifier = Modifier.fillMaxWidth(), raised = true) {
+        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Pairing with a new desktop", style = MaterialTheme.typography.titleLarge)
+            Text(state.address.host, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Pairing code", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(
                 Pairing.formatCode(state.code),
-                style = MaterialTheme.typography.displaySmall,
+                style = MaterialTheme.typography.displayMedium,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
             )
             Text("Does the desktop show the same code? Only continue if it does.")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { state.cancel() }) { Text("No, cancel") }
-                Button(onClick = { state.confirm() }) { Text("Yes, pair") }
+            // Large, equal-width buttons; cancel on the left, pair on the right (as on the desktop).
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                DangerButton("No, cancel", onClick = { state.cancel() }, modifier = Modifier.weight(1f), large = true)
+                PrimaryButton("Yes, pair", onClick = { state.confirm() }, modifier = Modifier.weight(1f), large = true)
             }
         }
     }
@@ -49,15 +50,19 @@ fun PairingCodeCard(state: PhoneConnection.State.ConfirmPairing) {
 /** Step 2: the phone's user confirmed; the desktop's user has to click Allow. */
 @Composable
 fun WaitingForDesktopCard(state: PhoneConnection.State.WaitingForDesktop, onCancel: () -> Unit) {
-    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Now click Allow on the desktop", style = MaterialTheme.typography.titleMedium)
+    AppCard(modifier = Modifier.fillMaxWidth(), raised = true) {
+        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                Text("Now click Allow on the desktop", style = MaterialTheme.typography.titleMedium)
+            }
             Text(
                 "Code ${Pairing.formatCode(state.code)}",
                 style = MaterialTheme.typography.titleLarge,
                 fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.primary,
             )
-            OutlinedButton(onClick = onCancel) { Text("Cancel") }
+            DangerButton("Cancel", onClick = onCancel, modifier = Modifier.fillMaxWidth(), large = true)
         }
     }
 }
@@ -67,19 +72,24 @@ fun WaitingForDesktopCard(state: PhoneConnection.State.WaitingForDesktop, onCanc
 fun PairedDesktopsList(paired: PairedDesktops) {
     val devices by paired.devices.collectAsState()
     if (devices.isEmpty()) return
-    Text("Paired desktops", style = MaterialTheme.typography.titleMedium)
+    SectionTitle("Paired desktops")
     devices.forEach { device ->
-        OutlinedCard(modifier = Modifier.fillMaxWidth()) {
-            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
+        AppCard(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.padding(16.dp).heightIn(min = BUTTON_HEIGHT),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("\"${device.name}\"", maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
                         Fingerprints.short(device.certSha256),
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                TextButton(onClick = { paired.forget(device.certSha256) }) { Text("Forget") }
+                DangerButton("Forget", onClick = { paired.forget(device.certSha256) })
             }
         }
     }
