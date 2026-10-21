@@ -3,4 +3,6 @@
     <!-- Palette.BACKGROUND in shared (a unit test checks they match). The window shows it before
          Compose draws anything, so the app never flashes white at launch. -->
     <color name="linkdrop_background">#FF0E1116</color>
+    <!-- The app icon's background: the black of design/Linkdrop-icon.png. -->
+    <color name="ic_launcher_background">#FF000000</color>
 </resources>
