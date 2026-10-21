@@ -12,8 +12,7 @@ pkgver=1.0.0
 pkgrel=1
 pkgdesc="Send files between this computer and an Android phone over local Wi-Fi"
 arch=('x86_64')
-# No license has been chosen for LinkDrop yet.
-license=('LicenseRef-unknown')
+license=('MIT')
 # What the bundled Java runtime and the Compose/Skia UI load from the system.
 depends=('glibc' 'gcc-libs' 'zlib' 'libx11' 'libxext' 'libxi' 'libxrender' 'libxtst'
          'fontconfig' 'freetype2' 'libgl' 'alsa-lib')
@@ -41,6 +40,9 @@ package() {
     ln -s /opt/linkdrop/bin/linkdrop "$pkgdir/usr/bin/linkdrop"
 
     install -Dm644 "$startdir/linkdrop.desktop" "$pkgdir/usr/share/applications/linkdrop.desktop"
+    # LinkDrop's license and the licenses of everything it ships (also in /opt/linkdrop/lib/app/resources/).
+    install -Dm644 "$_repo/LICENSE" "$pkgdir/usr/share/licenses/linkdrop/LICENSE"
+    install -Dm644 "$_repo/THIRD-PARTY-NOTICES" "$pkgdir/usr/share/licenses/linkdrop/THIRD-PARTY-NOTICES"
     # The app icon in every size (design/make-icons.sh); the menu entry's Icon=linkdrop finds them.
     for size in 16 32 48 64 128 256 512; do
         install -Dm644 "$_repo/desktopApp/icons/linkdrop-$size.png" \

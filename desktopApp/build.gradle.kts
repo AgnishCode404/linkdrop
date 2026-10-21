@@ -80,6 +80,14 @@ val checkNoPlaintextInRelease by tasks.registering {
 tasks.matching { it.name.startsWith("package") || it.name.endsWith("Distributable") }
     .configureEach { dependsOn(checkNoPlaintextInRelease) }
 
+// LICENSE and THIRD-PARTY-NOTICES go into every desktop package, in lib/app/resources/ next to the
+// app (the Arch package also installs them in /usr/share/licenses/linkdrop/).
+val legalFiles by tasks.registering(Sync::class) {
+    from(rootProject.file("LICENSE"), rootProject.file("THIRD-PARTY-NOTICES"))
+    into(layout.buildDirectory.dir("appResources/common"))
+}
+tasks.matching { it.name == "prepareAppResources" }.configureEach { dependsOn(legalFiles) }
+
 compose.desktop {
     application {
         mainClass = "com.agnish.linkdrop.MainKt"
@@ -97,6 +105,9 @@ compose.desktop {
             // packages createDistributable's output instead.
             targetFormats(TargetFormat.Deb)
             packageName = "linkdrop"
+            appResourcesRootDir.set(layout.buildDirectory.dir("appResources"))
+            // The .deb's copyright file.
+            licenseFile.set(rootProject.file("LICENSE"))
             // linkdrop.version (gradle.properties); packaging/arch/PKGBUILD checks its pkgver against it.
             packageVersion = providers.gradleProperty("linkdrop.version").get()
             linux {

@@ -220,6 +220,18 @@ lost, phones cannot update the app any more: it has to be uninstalled and paired
 Without the `linkdrop.signing.*` settings the release APK is built unsigned (a warning says so).
 The build refuses a key that is inside the repository, so it cannot be committed by accident.
 
+## License
+
+LinkDrop is released under the [MIT License](./LICENSE). Copyright (c) 2026 Agnish.
+
+It ships third-party libraries under their own licenses (mostly Apache 2.0; SLF4J and Bouncy
+Castle under MIT); [THIRD-PARTY-NOTICES](./THIRD-PARTY-NOTICES) lists every one with its license
+and contains the license texts and NOTICE files they require. Both files are included in the
+desktop packages (the Arch package also installs them in `/usr/share/licenses/linkdrop/`).
+
+THIRD-PARTY-NOTICES is generated: after adding, removing or updating a dependency, build the
+desktop distributable and run `tools/third_party_notices.py` (Python 3).
+
 ## Plaintext development mode (debugging only)
 
 By default every connection is TLS with pairing. For debugging, unencrypted `ws://` can be
