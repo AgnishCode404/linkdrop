@@ -155,3 +155,32 @@ val checkReleaseSigning by tasks.registering {
     }
 }
 tasks.matching { it.name == "preReleaseBuild" }.configureEach { dependsOn(checkReleaseSigning) }
+
+// LinkDrop's LICENSE and THIRD-PARTY-NOTICES (repository root) as assets, for the About screen.
+abstract class LegalAssets : DefaultTask() {
+    @get:InputFiles
+    abstract val files: ConfigurableFileCollection
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun copy() {
+        val dir = outputDir.get().asFile
+        dir.deleteRecursively()
+        dir.mkdirs()
+        files.forEach { it.copyTo(File(dir, it.name)) }
+    }
+}
+val legalAssets = tasks.register<LegalAssets>("legalAssets") {
+    files.from(rootProject.file("LICENSE"), rootProject.file("THIRD-PARTY-NOTICES"))
+}
+androidComponents {
+    onVariants { variant -> variant.sources.assets?.addGeneratedSourceDirectory(legalAssets, LegalAssets::outputDir) }
+}
+
+// `check` fails if THIRD-PARTY-NOTICES does not list every library the release APK ships.
+extra["noticesConfiguration"] = "releaseRuntimeClasspath"
+extra["noticesSection"] = "Android app"
+extra["noticesArtifactType"] = "android-classes-jar"
+apply(from = rootProject.file("gradle/third-party-notices.gradle.kts"))

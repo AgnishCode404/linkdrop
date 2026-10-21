@@ -244,8 +244,15 @@ fun PhoneScreen(
         }
     }
 
+    // The About screen (license and open source licenses) replaces the home screen; Back returns.
+    var showAbout by rememberSaveable { mutableStateOf(false) }
+
     LinkDropTheme {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            if (showAbout) {
+                AboutScreen(onBack = { showAbout = false })
+                return@Surface
+            }
             Column(
                 modifier = Modifier.safeContentPadding().padding(16.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -407,12 +414,16 @@ fun PhoneScreen(
                         retried = past.retried,
                     )
                 }
+
+                TextButton(onClick = { showAbout = true }, modifier = Modifier.heightIn(min = BUTTON_HEIGHT)) {
+                    Text("About", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
     }
 }
 
-/** The app must stay open during transfers (no background service yet), so keep the screen on. */
+/** Keeps the screen on while files transfer and LinkDrop is open (ConnectionService keeps them going when it is not). */
 @Composable
 private fun KeepScreenOnWhile(active: Boolean) {
     // LocalActivity, not LocalContext: the Compose context may be a wrapper around the activity.

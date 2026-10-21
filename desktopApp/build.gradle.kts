@@ -88,6 +88,11 @@ val legalFiles by tasks.registering(Sync::class) {
 }
 tasks.matching { it.name == "prepareAppResources" }.configureEach { dependsOn(legalFiles) }
 
+// `check` fails if THIRD-PARTY-NOTICES does not list every library this app ships.
+extra["noticesConfiguration"] = "runtimeClasspath"
+extra["noticesSection"] = "Desktop app (Linux)"
+apply(from = rootProject.file("gradle/third-party-notices.gradle.kts"))
+
 compose.desktop {
     application {
         mainClass = "com.agnish.linkdrop.MainKt"
