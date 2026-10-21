@@ -110,6 +110,10 @@ class PhoneConnection(
     @Volatile
     private var userDisconnected = false
 
+    /** Why this side ended the connection, if not the user (shown instead of "connection lost"). */
+    @Volatile
+    private var endReason: String? = null
+
     private val decider = OfferDecider { offer ->
         val pending = PendingOffer(offer)
         _offers.update { it + pending }
@@ -140,6 +144,7 @@ class PhoneConnection(
     fun connect(address: ServerAddress, desktopId: String? = null) {
         if (_state.value !is State.Disconnected) return
         userDisconnected = false
+        endReason = null
         _state.value = State.Connecting(address)
         onConnectionStarted()
         val pin = desktopId?.let { paired?.byDeviceId(it)?.certSha256 }
@@ -187,7 +192,11 @@ class PhoneConnection(
             }
             // Show the real cause (e.g. a ping timeout), not just "connection lost".
             _state.value = State.Disconnected(
-                if (userDisconnected) null else "connection lost" + (reason?.let { ": $it" } ?: ""),
+                when {
+                    userDisconnected -> null
+                    endReason != null -> endReason
+                    else -> "connection lost" + (reason?.let { ": $it" } ?: "")
+                },
             )
         }
     }
@@ -217,10 +226,19 @@ class PhoneConnection(
     }
 
     /** Disconnects, or cancels connecting or pairing. */
-    fun disconnect() {
-        userDisconnected = true
+    fun disconnect() = end(reason = null)
+
+    /**
+     * Disconnects because the app must (e.g. Android's background time limit), not the user:
+     * [reason] is shown afterwards, like a lost connection.
+     */
+    fun disconnect(reason: String) = end(reason)
+
+    private fun end(reason: String?) {
+        userDisconnected = reason == null
+        endReason = reason
         channel?.close(1000, "bye")
         job?.cancel()
-        if (_state.value !is State.Connected) _state.value = State.Disconnected()
+        if (_state.value !is State.Connected) _state.value = State.Disconnected(reason)
     }
 }

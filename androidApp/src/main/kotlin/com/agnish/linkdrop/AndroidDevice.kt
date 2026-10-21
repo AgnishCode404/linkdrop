@@ -13,6 +13,7 @@ object AndroidDevice {
     private const val KEY_DEVICE_ID = "deviceId"
     private const val KEY_LAST_ADDRESS = "lastAddress"
     private const val KEY_LAST_DESKTOP_ID = "lastDesktopId"
+    private const val KEY_NOTIFICATIONS_ASKED = "notificationsAsked"
 
     /** This phone's identity. The ID is random, created on first run and then kept. */
     fun load(context: Context): LocalDevice = LocalDevice(
@@ -29,6 +30,17 @@ object AndroidDevice {
     /** Remembers the desktop just connected to: its address (for sharing) and its id. */
     fun saveLastDesktop(context: Context, address: String, desktopId: String) {
         prefs(context).edit().putString(KEY_LAST_ADDRESS, address).putString(KEY_LAST_DESKTOP_ID, desktopId).apply()
+    }
+
+    /**
+     * Records that the notification permission was asked for. Returns true only the first time,
+     * so LinkDrop asks once, whatever the answer.
+     */
+    fun firstNotificationQuestion(context: Context): Boolean {
+        val prefs = prefs(context)
+        if (prefs.getBoolean(KEY_NOTIFICATIONS_ASKED, false)) return false
+        prefs.edit().putBoolean(KEY_NOTIFICATIONS_ASKED, true).apply()
+        return true
     }
 
     private fun loadOrCreateDeviceId(context: Context): String {

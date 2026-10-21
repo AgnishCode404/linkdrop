@@ -1,5 +1,6 @@
 package com.agnish.linkdrop
 
+import android.Manifest
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
@@ -153,11 +154,23 @@ fun PhoneScreen(
     val pairedDesktops by (connection.paired?.devices ?: noPairs).collectAsState()
     var manualAddress by rememberSaveable { mutableStateOf(false) }
 
+    // Android 13+: the connection notification needs permission. LinkDrop works without it.
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+
     // Remember the desktop once connected: its address (sharing connects there) and its id.
     LaunchedEffect(connected) {
         if (connected != null) {
             val target = "${connected.address.host}:${connected.address.port}"
             AndroidDevice.saveLastDesktop(context, target, connected.peerId)
+            // Asked once, right after the first successful connection: that is when the
+            // notification first matters (and it does not pile up with the questions at launch).
+            if (
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+                AndroidDevice.firstNotificationQuestion(context)
+            ) {
+                notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
         }
     }
     KeepScreenOnWhile(transfers.any { !it.finished })

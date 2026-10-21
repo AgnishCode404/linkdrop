@@ -124,6 +124,33 @@ class ConnectionService : Service() {
             }
     }
 
+    /**
+     * Android 15+: the 6 hours a day a data-sync service may run in the background are used up.
+     * The service must stop within seconds or Android ends the app, so: disconnect cleanly (the
+     * desktop sees a normal close; a file being received is kept for resuming), explain, stop.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        Log.w(TAG, "Android's time limit for this service was reached; disconnecting")
+        connection.disconnect(ConnectionNotification.TIME_LIMIT_REASON)
+        showTimeLimitNotice()
+        stop()
+    }
+
+    /** A normal (dismissable) notification, separate from the service's, so it stays after stopping. */
+    private fun showTimeLimitNotice() {
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+        val notice = Notification.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setColor(Palette.ACCENT.toInt())
+            .setContentTitle(ConnectionNotification.TIME_LIMIT_TITLE)
+            .setContentText(ConnectionNotification.TIME_LIMIT_TEXT)
+            .setStyle(Notification.BigTextStyle().bigText(ConnectionNotification.TIME_LIMIT_TEXT))
+            .setContentIntent(openApp())
+            .setAutoCancel(true)
+            .build()
+        getSystemService(NotificationManager::class.java)?.notify(TIME_LIMIT_NOTIFICATION_ID, notice)
+    }
+
     /** The CPU wake lock, only while files are being transferred (or wait for an answer). */
     private fun holdWakeLock(transferring: Boolean) {
         val lock = wakeLock ?: return
@@ -150,10 +177,13 @@ class ConnectionService : Service() {
         super.onDestroy()
     }
 
+    /** Opens LinkDrop (its existing screen, if open). */
+    private fun openApp(): PendingIntent? = packageManager.getLaunchIntentForPackage(packageName)?.let {
+        PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+    }
+
     private fun build(content: NotificationContent): Notification {
-        val open = packageManager.getLaunchIntentForPackage(packageName)?.let {
-            PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        }
+        val open = openApp()
         val disconnect = PendingIntent.getService(
             this,
             1,
@@ -188,6 +218,7 @@ class ConnectionService : Service() {
         private const val TAG = "ConnectionService"
         private const val CHANNEL_ID = "connection"
         private const val NOTIFICATION_ID = 1
+        private const val TIME_LIMIT_NOTIFICATION_ID = 2
         private const val ACTION_DISCONNECT = "com.agnish.linkdrop.action.DISCONNECT"
         private const val NOTIFICATION_INTERVAL_MILLIS = 1000L
         private const val PROGRESS_MAX = 1000

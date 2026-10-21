@@ -21,6 +21,13 @@ data class NotificationContent(
 
 /** Builds [NotificationContent] from the connection's state. No Android calls, so it is unit-tested. */
 object ConnectionNotification {
+    /**
+     * Android (15+) lets a data-sync foreground service run for 6 hours a day in the background;
+     * opening the app resets that. When it runs out, LinkDrop disconnects and says so.
+     */
+    const val TIME_LIMIT_REASON = "Android's background limit (6 hours a day) was reached"
+    const val TIME_LIMIT_TITLE = "LinkDrop disconnected"
+    const val TIME_LIMIT_TEXT = "Android allows background transfers for 6 hours a day. Open LinkDrop to reconnect."
 
     /** Whether the connection service should run: from the first connection attempt until it ends. */
     fun shouldRun(state: PhoneConnection.State): Boolean = state !is PhoneConnection.State.Disconnected

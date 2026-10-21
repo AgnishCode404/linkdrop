@@ -101,4 +101,13 @@ class ConnectionNotificationTest {
         assertEquals("Waiting to send 1 file(s) to \"archlinux\"", content.text)
         assertEquals(NotificationContent.Progress(null), content.progress)
     }
+
+    @Test
+    fun timeLimitNoticeTellsWhatToDo() {
+        // The notification (outside the app) says how to continue; the app's own message does not
+        // tell the user to open the app they are looking at.
+        assertTrue("Open LinkDrop to reconnect" in ConnectionNotification.TIME_LIMIT_TEXT)
+        assertFalse("Open LinkDrop" in ConnectionNotification.TIME_LIMIT_REASON)
+        assertTrue("6 hours" in ConnectionNotification.TIME_LIMIT_REASON)
+    }
 }

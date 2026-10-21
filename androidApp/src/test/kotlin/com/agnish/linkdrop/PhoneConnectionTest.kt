@@ -148,6 +148,27 @@ class PhoneConnectionTest {
     }
 
     @Test
+    fun disconnectingForAReasonShowsTheReason() = runBlocking {
+        val port = startDesktop()
+        val connection = connection()
+        connection.connect(ServerAddress("127.0.0.1", port))
+        connection.awaitState { it is PhoneConnection.State.Connected }
+
+        // As when Android's background time limit runs out (ConnectionService.onTimeout).
+        connection.disconnect(ConnectionNotification.TIME_LIMIT_REASON)
+        assertEquals(
+            PhoneConnection.State.Disconnected(ConnectionNotification.TIME_LIMIT_REASON),
+            connection.awaitState { it is PhoneConnection.State.Disconnected },
+        )
+
+        // The next connection starts clean: a later plain disconnect shows no reason.
+        connection.connect(ServerAddress("127.0.0.1", port))
+        connection.awaitState { it is PhoneConnection.State.Connected }
+        connection.disconnect()
+        assertEquals(PhoneConnection.State.Disconnected(null), connection.awaitState { it is PhoneConnection.State.Disconnected })
+    }
+
+    @Test
     fun disconnectingKeepsHistoryAndGivesNoError() = runBlocking {
         val port = startDesktop()
         val connection = connection()
