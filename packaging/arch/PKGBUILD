@@ -41,6 +41,9 @@ package() {
     ln -s /opt/linkdrop/bin/linkdrop "$pkgdir/usr/bin/linkdrop"
 
     install -Dm644 "$startdir/linkdrop.desktop" "$pkgdir/usr/share/applications/linkdrop.desktop"
-    install -Dm644 "$_repo/desktopApp/icons/linkdrop.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/linkdrop.svg"
-    install -Dm644 "$_repo/desktopApp/icons/linkdrop.png" "$pkgdir/usr/share/icons/hicolor/512x512/apps/linkdrop.png"
+    # The app icon in every size (design/make-icons.sh); the menu entry's Icon=linkdrop finds them.
+    for size in 16 32 48 64 128 256 512; do
+        install -Dm644 "$_repo/desktopApp/icons/linkdrop-$size.png" \
+            "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/linkdrop.png"
+    done
 }

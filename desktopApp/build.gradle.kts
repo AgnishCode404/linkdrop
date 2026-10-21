@@ -59,8 +59,8 @@ val generateBuildFlags by tasks.registering {
 }
 kotlin.sourceSets.main {
     kotlin.srcDir(generateBuildFlags)
-    // The app icon, also used for the window at runtime. linkdrop.png is rendered from linkdrop.svg:
-    //   rsvg-convert -w 512 -h 512 icons/linkdrop.svg -o icons/linkdrop.png
+    // The app icon in every size, also used for the window at runtime. Generated from
+    // design/Linkdrop-icon.png by design/make-icons.sh.
     resources.srcDir("icons")
 }
 
@@ -100,7 +100,8 @@ compose.desktop {
             // linkdrop.version (gradle.properties); packaging/arch/PKGBUILD checks its pkgver against it.
             packageVersion = providers.gradleProperty("linkdrop.version").get()
             linux {
-                iconFile.set(project.file("icons/linkdrop.png"))
+                // jpackage takes one image for the launcher and the .deb's menu entry.
+                iconFile.set(project.file("icons/linkdrop-512.png"))
             }
         }
     }

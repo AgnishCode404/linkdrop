@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-  <!-- LinkDrop app icon. linkdrop.png is rendered from this file (see desktopApp/build.gradle.kts). -->
-  <rect x="8" y="8" width="240" height="240" rx="56" fill="#3D5AFE"/>
-  <path d="M128 36 C128 36 64 108 64 152 A64 64 0 0 0 192 152 C192 108 128 36 128 36 Z" fill="#FFFFFF"/>
-  <path d="M128 112 V184 M98 156 L128 186 L158 156" fill="none" stroke="#3D5AFE" stroke-width="16"
-        stroke-linecap="round" stroke-linejoin="round"/>
-</svg>

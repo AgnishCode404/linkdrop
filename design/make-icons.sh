@@ -42,3 +42,10 @@ for density in mdpi:1 hdpi:1.5 xhdpi:2 xxhdpi:3 xxxhdpi:4; do
         \( -size "${legacy}x${legacy}" xc:none -fill white -draw "circle $radius,$radius $radius,0" \) \
         -compose DstIn -composite -strip "PNG32:$out/ic_launcher_round.png"
 done
+
+# Desktop: the whole image at each size the desktop uses (window icon, menu entry, packages). The
+# window manager and the icon theme pick the size that fits best.
+mkdir -p desktopApp/icons
+for size in 16 32 48 64 128 256 512; do
+    magick "$SRC" -resize "${size}x${size}" -strip "PNG32:desktopApp/icons/linkdrop-$size.png"
+done
