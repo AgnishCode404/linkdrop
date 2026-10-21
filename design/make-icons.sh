@@ -49,3 +49,19 @@ mkdir -p desktopApp/icons
 for size in 16 32 48 64 128 256 512; do
     magick "$SRC" -resize "${size}x${size}" -strip "PNG32:desktopApp/icons/linkdrop-$size.png"
 done
+
+# Android notification icon (status bar): Android uses only its transparency and draws it in one
+# color, so the white links become the shape and the black becomes transparent (as for the
+# monochrome launcher layer). Trimmed to the links and fitted into 20dp of the 24dp icon (2dp
+# padding, as Android's guidelines ask).
+for density in mdpi:1 hdpi:1.5 xhdpi:2 xxhdpi:3 xxxhdpi:4; do
+    name=${density%%:*}
+    factor=${density##*:}
+    canvas=$(awk "BEGIN { printf \"%d\", 24 * $factor + 0.5 }")
+    art=$(awk "BEGIN { printf \"%d\", 20 * $factor + 0.5 }")
+    out=$RES/drawable-$name
+    mkdir -p "$out"
+    magick "$SRC" -colorspace Gray -alpha copy -fill white -colorize 100 -colorspace sRGB -trim +repage \
+        -resize "${art}x${art}" -background none -gravity center -extent "${canvas}x${canvas}" \
+        -strip "PNG32:$out/ic_notification.png"
+done
