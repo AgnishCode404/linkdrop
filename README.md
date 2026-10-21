@@ -220,6 +220,14 @@ lost, phones cannot update the app any more: it has to be uninstalled and paired
 Without the `linkdrop.signing.*` settings the release APK is built unsigned (a warning says so).
 The build refuses a key that is inside the repository, so it cannot be committed by accident.
 
+**Shrinking.** Release builds are shrunk with R8 (about 3 MB instead of 26 MB): unused code and
+resources are removed and names are shortened. Debug builds and the tests are not shrunk, so
+**try the release APK on a phone** (pair, send and receive a file) before giving it to anyone,
+especially after changing a dependency. A crash report from a release build shows shortened
+names; `androidApp/build/outputs/mapping/release/mapping.txt` from the same build turns them back
+(with `retrace` from the Android SDK's command-line tools, which Android Studio's SDK Manager
+installs), so keep that file with each release you share.
+
 ## License
 
 LinkDrop is released under the [MIT License](./LICENSE). Copyright (c) 2026 Agnish.

@@ -90,7 +90,11 @@ android {
             // Never plaintext in a release, regardless of linkdrop.allowPlaintext.
             buildConfigField("boolean", "ALLOW_PLAINTEXT", "false")
             if (releaseSigning) signingConfig = signingConfigs.getByName("release")
-            isMinifyEnabled = false
+            // R8: removes unused code and resources and shortens names (release only; debug builds
+            // and tests are unchanged). Libraries bring their own keep rules; LinkDrop needs none:
+            // every JSON message names its serializer in code, nothing is looked up by class name.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
