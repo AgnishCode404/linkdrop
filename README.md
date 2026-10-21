@@ -230,7 +230,9 @@ and contains the license texts and NOTICE files they require. Both files are inc
 desktop packages (the Arch package also installs them in `/usr/share/licenses/linkdrop/`).
 
 THIRD-PARTY-NOTICES is generated: after adding, removing or updating a dependency, build the
-desktop distributable and run `tools/third_party_notices.py` (Python 3).
+desktop distributable and run `tools/third_party_notices.py` (Python 3). `./gradlew check` fails
+until you do: it checks that the file lists every library each app ships, with its version. The
+Android app shows both files under **About** (at the bottom of the home screen).
 
 ## Plaintext development mode (debugging only)
 
