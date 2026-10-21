@@ -52,8 +52,8 @@ fun ConnectionRequestDialog(request: ConnectionRequest) {
 /** The dialog's contents (separate so a test can render them at the dialog's size). */
 @Composable
 fun ConnectionRequestContent(request: ConnectionRequest) {
-    MaterialTheme {
-        Surface(modifier = Modifier.fillMaxSize()) {
+    LinkDropTheme {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
             Column(modifier = Modifier.padding(24.dp)) {
                 // The text takes the remaining space (and scrolls if it ever does not fit, e.g. a
                 // long name or large system fonts), so the buttons below can never be pushed out.

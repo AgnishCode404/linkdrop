@@ -4,10 +4,12 @@ import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -81,7 +83,11 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
+        // Light status and navigation bar icons on the always-dark app, whatever the system theme.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+        )
         super.onCreate(savedInstanceState)
 
         val connection = (application as LinkDropApplication).connection
@@ -224,8 +230,8 @@ fun PhoneScreen(
         }
     }
 
-    MaterialTheme {
-        Surface(modifier = Modifier.fillMaxSize()) {
+    LinkDropTheme {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(
                 modifier = Modifier.safeContentPadding().padding(16.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),

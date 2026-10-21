@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Always dark, whatever the phone is set to. The screens themselves use LinkDropTheme;
+         this only covers the window and the launch splash screen before Compose draws. -->
+    <style name="Theme.LinkDrop" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/linkdrop_background</item>
+        <item name="android:windowSplashScreenBackground">@color/linkdrop_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>

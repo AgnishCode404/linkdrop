@@ -166,8 +166,8 @@ fun DesktopScreen(
     val offers by state.offers.collectAsState()
     val history by state.history.collectAsState()
 
-    MaterialTheme {
-        Surface(modifier = Modifier.fillMaxSize()) {
+    LinkDropTheme {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(
                 modifier = Modifier.padding(16.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp),

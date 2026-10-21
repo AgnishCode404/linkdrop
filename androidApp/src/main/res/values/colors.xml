@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Palette.BACKGROUND in shared (a unit test checks they match). The window shows it before
+         Compose draws anything, so the app never flashes white at launch. -->
+    <color name="linkdrop_background">#FF0E1116</color>
+</resources>
