@@ -33,14 +33,18 @@ private const val MAX_LISTED_FILES = 20
 @Composable
 fun PhoneCard(connection: PeerConnection, onSend: () -> Unit) {
     val transfers by connection.session.transfers.collectAsState()
-    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("\"${connection.name}\"", style = MaterialTheme.typography.titleMedium)
-                    Text(connection.address, style = MaterialTheme.typography.bodySmall)
+    AppCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    StatusLine("\"${connection.name}\"", Tone.Active)
+                    Text(
+                        connection.address + if (connection.peerKey != null) " · encrypted, paired" else "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-                Button(onClick = onSend, enabled = connection.transferEnabled) { Text("Send files…") }
+                PrimaryButton("Send files…", onClick = onSend, enabled = connection.transferEnabled)
             }
             if (!connection.transferEnabled) {
                 Text(

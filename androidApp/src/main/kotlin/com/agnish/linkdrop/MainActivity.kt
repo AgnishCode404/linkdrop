@@ -20,15 +20,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeContentPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -237,14 +238,12 @@ fun PhoneScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text("LinkDrop", style = MaterialTheme.typography.headlineSmall)
-                Text("This device: ${local.deviceName}")
-                if (plaintext) {
-                    Text("Development build: connections are NOT encrypted.", color = MaterialTheme.colorScheme.error)
-                }
+                Text("This device: ${local.deviceName}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (plaintext) WarningBanner("Development build: connections are NOT encrypted.")
 
                 when (val s = state) {
                     is PhoneConnection.State.Disconnected -> {
-                        s.reason?.let { Text("Not connected: $it", color = MaterialTheme.colorScheme.error) }
+                        s.reason?.let { StatusLine("Not connected: $it", Tone.Error) }
                         DesktopList(
                             desktops = desktops,
                             lastDesktopId = lastDesktopId,
@@ -256,7 +255,7 @@ fun PhoneScreen(
                                 requestConnect(desktop.address, desktop.deviceId)
                             },
                         )
-                        TextButton(onClick = { manualAddress = !manualAddress }) {
+                        TextButton(onClick = { manualAddress = !manualAddress }, modifier = Modifier.heightIn(min = BUTTON_HEIGHT)) {
                             Text(if (manualAddress) "Hide manual address" else "Enter address manually")
                         }
                         if (manualAddress) {
@@ -271,42 +270,62 @@ fun PhoneScreen(
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                                 modifier = Modifier.fillMaxWidth(),
                             )
-                            Button(onClick = { requestConnect(address) }, enabled = address != null) {
-                                Text("Connect")
-                            }
+                            PrimaryButton(
+                                "Connect",
+                                onClick = { requestConnect(address) },
+                                enabled = address != null,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
                         }
                         connection.paired?.let { PairedDesktopsList(it) }
                     }
                     is PhoneConnection.State.ConfirmPairing -> PairingCodeCard(s)
                     is PhoneConnection.State.WaitingForDesktop -> WaitingForDesktopCard(s, onCancel = { connection.disconnect() })
-                    is PhoneConnection.State.Connecting -> {
-                        Text("Connecting to ${s.address.host}:${s.address.port}…")
-                        OutlinedButton(onClick = { connection.disconnect() }) { Text("Cancel") }
-                    }
-                    is PhoneConnection.State.Connected -> {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                "Connected to \"${s.peerName}\"" + if (s.secure) " (encrypted, paired)" else "",
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.weight(1f),
-                            )
-                            OutlinedButton(onClick = { connection.disconnect() }) { Text("Disconnect") }
+                    is PhoneConnection.State.Connecting -> AppCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                Text("Connecting to ${s.address.host}:${s.address.port}…")
+                            }
+                            DangerButton("Cancel", onClick = { connection.disconnect() }, modifier = Modifier.fillMaxWidth())
                         }
-                        if (s.transferEnabled) {
-                            Button(onClick = { pickFiles.launch(arrayOf("*/*")) }) { Text("Send files") }
-                            Text(
-                                "Keep LinkDrop open while files transfer.",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        } else {
-                            Text(
-                                "The desktop's LinkDrop app is too old to transfer files.",
-                                color = MaterialTheme.colorScheme.error,
-                            )
+                    }
+                    is PhoneConnection.State.Connected -> AppCard(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    StatusLine("Connected to \"${s.peerName}\"", Tone.Active)
+                                    if (s.secure) {
+                                        Text(
+                                            "Encrypted, paired",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                                DangerButton("Disconnect", onClick = { connection.disconnect() })
+                            }
+                            if (s.transferEnabled) {
+                                PrimaryButton(
+                                    "Send files",
+                                    onClick = { pickFiles.launch(arrayOf("*/*")) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                Text(
+                                    "Keep LinkDrop open while files transfer.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else {
+                                Text(
+                                    "The desktop's LinkDrop app is too old to transfer files.",
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
                         }
                     }
                 }
-                problem?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                problem?.let { StatusLine(it, Tone.Error) }
 
                 if (share != null) {
                     val sources = shareSources
@@ -339,8 +358,14 @@ fun PhoneScreen(
                 offers.forEach { OfferCard(it) }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Received files go to $RECEIVE_FOLDER", modifier = Modifier.weight(1f))
-                    TextButton(onClick = { openDownloads(context) }) { Text("Open") }
+                    Text(
+                        "Received files go to $RECEIVE_FOLDER",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { openDownloads(context) }, modifier = Modifier.heightIn(min = BUTTON_HEIGHT)) {
+                        Text("Open")
+                    }
                 }
 
                 val peerName = connected?.peerName ?: "desktop"

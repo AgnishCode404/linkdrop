@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -170,69 +171,77 @@ fun DesktopScreen(
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             Column(
                 modifier = Modifier.padding(16.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text("LinkDrop", style = MaterialTheme.typography.headlineSmall)
-                Text("This device: ${local.deviceName}")
-                identity?.let {
-                    Text(
-                        "Identity: ${Fingerprints.short(it.fingerprint)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                    )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("LinkDrop", style = MaterialTheme.typography.headlineSmall)
+                    Text("This device: ${local.deviceName}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    identity?.let {
+                        Text(
+                            "Identity: ${Fingerprints.short(it.fingerprint)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
-                if (transport == TransportConfig.Plaintext) {
-                    Text(
-                        "Development build: connections are NOT encrypted.",
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-                SelectionContainer {
-                    Column {
-                        when {
-                            startError != null -> Text(startError, color = MaterialTheme.colorScheme.error)
-                            addresses.isEmpty() -> Text(
-                                "Listening on port $DEFAULT_PORT, but no Wi-Fi/LAN address was found.",
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                            else -> {
-                                when (val v = visibility) {
-                                    is DesktopAnnouncer.Status.Visible -> Text(
-                                        "Phones on this Wi-Fi list this desktop as \"${v.name}\".",
-                                        color = MaterialTheme.colorScheme.primary,
-                                    )
-                                    DesktopAnnouncer.Status.Starting -> Text("Announcing this desktop on the network…")
-                                    is DesktopAnnouncer.Status.NotVisible -> Text(
-                                        "Phones cannot find this desktop automatically (${v.reason}).",
-                                        color = MaterialTheme.colorScheme.error,
-                                    )
-                                }
-                                Text("Or enter this address on the phone:")
-                                addresses.forEach {
-                                    Text("$it:$DEFAULT_PORT", style = MaterialTheme.typography.titleLarge)
+                if (transport == TransportConfig.Plaintext) WarningBanner("Development build: connections are NOT encrypted.")
+                AppCard(modifier = Modifier.fillMaxWidth()) {
+                    SelectionContainer {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            when {
+                                startError != null -> StatusLine(startError, Tone.Error)
+                                addresses.isEmpty() -> StatusLine(
+                                    "Listening on port $DEFAULT_PORT, but no Wi-Fi/LAN address was found.",
+                                    Tone.Error,
+                                )
+                                else -> {
+                                    when (val v = visibility) {
+                                        is DesktopAnnouncer.Status.Visible ->
+                                            StatusLine("Phones on this Wi-Fi list this desktop as \"${v.name}\".", Tone.Good)
+                                        DesktopAnnouncer.Status.Starting ->
+                                            StatusLine("Announcing this desktop on the network…", Tone.Neutral)
+                                        is DesktopAnnouncer.Status.NotVisible ->
+                                            StatusLine("Phones cannot find this desktop automatically (${v.reason}).", Tone.Error)
+                                    }
+                                    Text("Or enter this address on the phone:", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    addresses.forEach {
+                                        Text(
+                                            "$it:$DEFAULT_PORT",
+                                            style = MaterialTheme.typography.titleLarge,
+                                            fontFamily = FontFamily.Monospace,
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Received files go to $receiveDir", modifier = Modifier.weight(1f))
-                    TextButton(onClick = onOpenFolder) { Text("Open folder") }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "Received files go to $receiveDir",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = onOpenFolder, modifier = Modifier.heightIn(min = BUTTON_HEIGHT)) { Text("Open folder") }
                 }
 
                 offers.forEach { OfferCard(it) }
 
                 HorizontalDivider()
-                Text("Phones", style = MaterialTheme.typography.titleMedium)
+                SectionTitle("Phones")
                 if (connections.isEmpty()) {
-                    Text("No phone connected. Tap Connect in the LinkDrop app on your phone.")
+                    Text(
+                        "No phone connected. Tap Connect in the LinkDrop app on your phone.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 connections.forEach { PhoneCard(it, onSend = { onSendFiles(it) }) }
 
                 PairedPhonesList(pairedPhones)
 
                 if (history.isNotEmpty()) {
-                    Text("Earlier", style = MaterialTheme.typography.titleMedium)
+                    SectionTitle("Earlier")
                     history.asReversed().forEach { past ->
                         val canRetry = state.retryTarget(past, connections) != null
                         TransferCard(

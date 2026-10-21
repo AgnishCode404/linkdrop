@@ -7,8 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -89,13 +87,13 @@ fun ShareCard(
     progress: ShareProgress,
     onDone: () -> Unit,
 ) {
-    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    AppCard(modifier = Modifier.fillMaxWidth(), raised = true) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             when (share) {
                 is ShareRequest.NothingToSend -> {
                     Text("Nothing to send", style = MaterialTheme.typography.titleMedium)
-                    Text(share.reason)
-                    Button(onClick = onDone) { Text("Close") }
+                    Text(share.reason, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    PrimaryButton("Close", onClick = onDone, modifier = Modifier.fillMaxWidth())
                 }
                 is ShareRequest.Files -> {
                     Text(
@@ -103,21 +101,21 @@ fun ShareCard(
                         style = MaterialTheme.typography.titleMedium,
                     )
                     fileNames.take(5).forEach { Text("• $it", maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                    if (fileNames.size > 5) Text("… and ${fileNames.size - 5} more")
+                    if (fileNames.size > 5) Text("… and ${fileNames.size - 5} more", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (unreadable > 0) {
-                        Text("$unreadable item(s) could not be read and are skipped.", color = MaterialTheme.colorScheme.error)
+                        Text("$unreadable item(s) could not be read and are skipped.", color = LinkDropColors.Warning)
                     }
                     when (progress) {
-                        ShareProgress.Reading -> Text("Reading files…")
+                        ShareProgress.Reading -> StatusLine("Reading files…", Tone.Neutral)
                         ShareProgress.NeedsAddress ->
-                            Text("Enter the desktop address and tap Connect. The files are sent once connected.")
-                        ShareProgress.Connecting -> Text("Connecting to the desktop…")
-                        is ShareProgress.CannotSend -> Text(progress.reason, color = MaterialTheme.colorScheme.error)
+                            StatusLine("Enter the desktop address and tap Connect. The files are sent once connected.", Tone.Neutral)
+                        ShareProgress.Connecting -> StatusLine("Connecting to the desktop…", Tone.Active)
+                        is ShareProgress.CannotSend -> StatusLine(progress.reason, Tone.Error)
                         is ShareProgress.Sending -> if (progress.finished) {
-                            Text("Finished. See the result below.")
-                            Button(onClick = onDone) { Text("Done") }
+                            StatusLine("Finished. See the result below.", Tone.Good)
+                            PrimaryButton("Done", onClick = onDone, modifier = Modifier.fillMaxWidth())
                         } else {
-                            Text("Sending to \"${progress.peerName}\". Keep LinkDrop open until it finishes.")
+                            StatusLine("Sending to \"${progress.peerName}\". Keep LinkDrop open until it finishes.", Tone.Active)
                         }
                     }
                 }
