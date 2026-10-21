@@ -104,22 +104,25 @@ fun Tag(text: String, color: Color) {
 
 /**
  * A card on the page, a step lighter than the background. [raised]: one that waits for the user
- * (an offer, a share), a step lighter again. With [onClick] the whole card is the tap target.
+ * (an offer, a share), a step lighter again. [outlined]: with a thin border, for a card inside
+ * another card (the same color would hide its edge). With [onClick] the whole card is the tap target.
  */
 @Composable
 fun AppCard(
     modifier: Modifier = Modifier,
     raised: Boolean = false,
+    outlined: Boolean = false,
     onClick: (() -> Unit)? = null,
     enabled: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val color = if (raised) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surface
     val colors = CardDefaults.cardColors(containerColor = color, disabledContainerColor = color)
+    val border = if (outlined) BorderStroke(1.dp, MaterialTheme.colorScheme.outline) else null
     if (onClick != null) {
-        Card(onClick = onClick, modifier = modifier, enabled = enabled, colors = colors, content = content)
+        Card(onClick = onClick, modifier = modifier, enabled = enabled, colors = colors, border = border, content = content)
     } else {
-        Card(modifier = modifier, colors = colors, content = content)
+        Card(modifier = modifier, colors = colors, border = border, content = content)
     }
 }
 
