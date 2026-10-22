@@ -1,5 +1,75 @@
-LinkDrop transfers files between a Linux desktop and an Android phone on the same Wi-Fi,
-in both directions. It is a Kotlin Multiplatform project.
+# LinkDrop
+
+LinkDrop transfers files between a Linux desktop and an Android phone on the same Wi-Fi, in both directions.
+
+## Install
+
+### 1. Android (Android 12 or newer)
+
+1. On the phone, download
+   [LinkDrop.apk](https://github.com/AgnishCode404/linkdrop/releases/latest/download/LinkDrop.apk).
+2. Check the download against the SHA-256 in the release notes.
+3. Open it. Android asks you to allow installs from your browser, and Play Protect may warn that
+   the app is unknown. This is normal for apps from outside the Play Store.
+
+### 2. Arch Linux (and Arch-based systems)
+
+```
+sudo pacman -S --needed git base-devel
+git clone https://github.com/AgnishCode404/linkdrop.git
+cd linkdrop/packaging/arch
+makepkg -si
+```
+
+The first build needs internet (Gradle downloads Java 25 and the dependencies) and takes several
+minutes. It installs a "LinkDrop" menu entry and a `linkdrop` command. The package carries its own
+Java, so none is needed on the system. Remove it with `sudo pacman -R linkdrop`.
+
+### 3. Ubuntu and Debian
+
+1. Download
+   [linkdrop_1.0.0_amd64.deb](https://github.com/AgnishCode404/linkdrop/releases/download/v1.0.0/linkdrop_1.0.0_amd64.deb).
+2. The .deb is not signed: check its SHA-256 against the release notes
+   (`sha256sum linkdrop_1.0.0_amd64.deb`).
+3. Install it: `sudo apt install ./linkdrop_1.0.0_amd64.deb`
+
+Remove it with `sudo apt remove linkdrop`.
+
+Or build it yourself:
+
+```
+sudo apt install git openjdk-17-jdk fakeroot binutils dpkg-dev
+git clone https://github.com/AgnishCode404/linkdrop.git
+cd linkdrop
+./gradlew :desktopApp:packageDeb
+```
+
+Then install the .deb found under `desktopApp/build/compose/binaries/main/deb/` as above.
+
+### 4. After installing
+
+- The phone and the computer must be on the same Wi-Fi.
+- If the computer has a firewall, allow port 47800, for example `sudo ufw allow 47800/tcp`. For
+  the phone to find the computer by itself, also allow `5353/udp` (otherwise type its address).
+- Open LinkDrop on both. On the phone, pick the computer from the list (or type the address its
+  window shows). The first time, check that both screens show the same 6-digit code and confirm
+  on both.
+
+### What has been tested
+
+| What | Status |
+|---|---|
+| Android APK (signed release build) | Tested on a real phone |
+| Arch Linux package | Tested on Arch with `makepkg -si` |
+| Ubuntu 24.04 .deb | Built, installed, run, paired and removed, in a container. Not verified: the menu entry and icon on a real Ubuntu desktop |
+| Debian | Not tested |
+| Other Linux distributions, Windows, macOS | Not supported yet |
+
+There has been no independent security review yet.
+
+## About
+
+It is a Kotlin Multiplatform project.
 
 Connections are encrypted (TLS 1.3) and both devices prove who they are with a certificate.
 A phone and a desktop **pair** once, after both users compared the same 6-digit code; from then
