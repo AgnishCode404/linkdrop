@@ -32,7 +32,12 @@ on they recognise each other. Things to know:
   in `/opt/linkdrop` with its own Java runtime, plus a `linkdrop` command, a menu entry and the
   icon. Remove it with `sudo pacman -R linkdrop`.
 - **Desktop, Debian or Ubuntu:** `./gradlew :desktopApp:packageDeb` writes a `.deb` to
-  `desktopApp/build/compose/binaries/main/deb/` (it needs `dpkg-deb`, which Arch does not have).
+  `desktopApp/build/compose/binaries/main/deb/`; install it with `sudo apt install ./linkdrop_*.deb`.
+  A fresh system needs a JDK to start Gradle and `fakeroot` for the package
+  (`sudo apt install openjdk-21-jdk-headless fakeroot`; `dpkg-deb` comes with the system, but
+  not with Arch). Gradle downloads everything else, including JDK 25. The desktop app needs **no
+  Android SDK**: build it with the `:desktopApp:` tasks, not `./gradlew build`, which also builds
+  the Android app.
 - **Desktop, any Linux, without installing:** `./gradlew :desktopApp:createDistributable`, then
   run `desktopApp/build/compose/binaries/main/app/linkdrop/bin/linkdrop`.
 - **Phone:** the debug build with `./gradlew :androidApp:installDebug`, or a signed release

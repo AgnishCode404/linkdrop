@@ -109,7 +109,15 @@ compose.desktop {
             // .deb for Debian/Ubuntu (needs dpkg-deb). Arch: packaging/arch/PKGBUILD, which
             // packages createDistributable's output instead.
             targetFormats(TargetFormat.Deb)
+            // Lowercase: the .deb's package name, the command (bin/linkdrop) and /opt/linkdrop. It is
+            // also the name jpackage gives the .deb's menu entry ("linkdrop"); the Arch package's own
+            // menu entry says "LinkDrop".
             packageName = "linkdrop"
+            // The .deb's Description and its menu entry's Comment (the same text as the PKGBUILD's pkgdesc).
+            description = "Send files between this computer and an Android phone over local Wi-Fi"
+            copyright = "Copyright (c) 2026 Agnish"
+            // The .deb's Maintainer is "<vendor> <<debMaintainer>>"; jpackage would put "Unknown <Unknown>".
+            vendor = "AgnishCode404"
             appResourcesRootDir.set(layout.buildDirectory.dir("appResources"))
             // The .deb's copyright file.
             licenseFile.set(rootProject.file("LICENSE"))
@@ -118,6 +126,13 @@ compose.desktop {
             linux {
                 // jpackage takes one image for the launcher and the .deb's menu entry.
                 iconFile.set(project.file("icons/linkdrop-512.png"))
+                // A GitHub noreply address, so no personal address is published in the package.
+                debMaintainer = "313144643+AgnishCode404@users.noreply.github.com"
+                // Without this the .deb installs no menu entry at all.
+                shortcut = true
+                // The menu entry's Categories (as in packaging/arch/linkdrop.desktop) and the .deb's Section.
+                menuGroup = "Network;FileTransfer;"
+                appCategory = "net"
             }
         }
     }
